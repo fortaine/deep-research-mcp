@@ -25,7 +25,7 @@ from fastmcp.server.tasks import TaskConfig
 
 from deep_research_mcp import __version__
 from deep_research_mcp.citations import process_citations
-from deep_research_mcp.deep import deep_research_stream, get_research_status
+from deep_research_mcp.deep import deep_research_stream, get_research_status, research_followup as _research_followup
 from deep_research_mcp.quick import quick_research
 from deep_research_mcp.types import DeepResearchError, DeepResearchResult
 
@@ -45,7 +45,7 @@ mcp = FastMCP(
     instructions="""
 Deep Research MCP Server - AI-powered research using Gemini
 
-This server provides three tools:
+This server provides four tools:
 
 1. **research_quick**: Fast web search with Gemini grounding (5-30 seconds)
    - Use for quick lookups, fact-checking, current events
@@ -54,12 +54,18 @@ This server provides three tools:
 2. **research_deep**: Comprehensive autonomous research (3-20 minutes)
    - Use for complex questions requiring multi-source synthesis
    - Runs as background task with progress updates
+   - Optionally search your own data with file_search_store_names
 
 3. **research_status**: Check status of deep research tasks
    - Provide the interaction_id from research_deep
    - Returns current status and results if complete
 
+4. **research_followup**: Ask follow-up questions about completed research
+   - Continue the conversation without restarting research
+   - Ask for clarification, elaboration, or summarization
+
 Choose research_quick for simple questions, research_deep for thorough investigation.
+Use research_followup to dive deeper into completed research.
 """,
 )
 
@@ -185,6 +191,7 @@ async def research_quick(
 async def research_deep(
     query: Annotated[str, "Research question or complex topic requiring thorough investigation"],
     format_instructions: Annotated[Optional[str], "Optional instructions for report format (e.g., 'include comparison table')"] = None,
+    file_search_store_names: Annotated[Optional[list[str]], "Optional list of Gemini File Search store names for RAG (e.g., ['fileSearchStores/my-store'])"] = None,
     progress: Progress = Progress(),
 ) -> str:
     """
@@ -200,12 +207,15 @@ async def research_deep(
     Args:
         query: Research question or complex topic
         format_instructions: Optional formatting instructions for the report
+        file_search_store_names: Optional list of file search store names for searching your own data
         progress: Progress tracker (injected by FastMCP)
 
     Returns:
         Comprehensive research report with citations
     """
     logger.info("🔬 research_deep (TASK): %s", query[:100])
+    if file_search_store_names:
+        logger.info("   📁 File search stores: %s", file_search_store_names)
     start = time.time()
 
     # Set progress total (100 = 100%)
@@ -224,6 +234,7 @@ async def research_deep(
         async for event in deep_research_stream(
             query=query,
             format_instructions=format_instructions,
+            file_search_store_names=file_search_store_names,
         ):
             if event.interaction_id:
                 interaction_id = event.interaction_id
@@ -362,6 +373,52 @@ async def research_status(
     except Exception as e:
         logger.exception("research_status failed: %s", e)
         return f"❌ Error checking status: {e}"
+
+
+@mcp.tool
+async def research_followup(
+    previous_interaction_id: Annotated[str, "The interaction_id from a completed research_deep task"],
+    query: Annotated[str, "Follow-up question about the research (e.g., 'elaborate on the second point')"],
+    model: Annotated[str, "Model to use for follow-up. Default: gemini-3-pro-preview"] = "gemini-3-pro-preview",
+) -> str:
+    """
+    Ask a follow-up question about completed Deep Research.
+
+    Continue the conversation after research completes to get clarification,
+    summarization, or elaboration on specific sections without restarting
+    the entire research task.
+
+    Args:
+        previous_interaction_id: The interaction_id from research_deep
+        query: Your follow-up question
+        model: Model to use (default: gemini-3-pro-preview)
+
+    Returns:
+        Response to the follow-up question
+    """
+    logger.info("💬 research_followup: %s -> %s", previous_interaction_id, query[:100])
+
+    try:
+        response = await _research_followup(
+            previous_interaction_id=previous_interaction_id,
+            query=query,
+            model=model,
+        )
+
+        lines = [
+            "## Follow-up Response",
+            "",
+            response,
+            "",
+            "---",
+            f"*Interaction ID: `{previous_interaction_id}`*",
+        ]
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        logger.exception("research_followup failed: %s", e)
+        return f"❌ Follow-up failed: {e}"
 
 
 # =============================================================================

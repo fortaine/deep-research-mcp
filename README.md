@@ -12,6 +12,13 @@ MCP server for AI-powered research using **Gemini + Google Grounded Search**.
 | `research_quick` | Fast grounded search with citations | 5-30 sec |
 | `research_deep` | Multi-step research with real-time progress ([MCP Tasks](https://spec.modelcontextprotocol.io/specification/draft/server/tasks/)) | 3-20 min |
 | `research_status` | Check status of background research tasks | instant |
+| `research_followup` | Ask follow-up questions about completed research | 5-30 sec |
+
+### Advanced Features
+
+- **File Search**: Search your own data alongside web search using `file_search_store_names`
+- **Follow-up Questions**: Continue the conversation after research completes using `previous_interaction_id`
+- **Format Instructions**: Control report structure (sections, tables, tone)
 
 ## Installation
 

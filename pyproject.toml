@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "deep-research-mcp"
-version = "2.2.0"
+version = "2.3.0"
 description = "MCP server for AI-powered research using Gemini grounding with background tasks support"
 readme = "README.md"
 license = "MIT"

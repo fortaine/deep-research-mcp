@@ -462,3 +462,67 @@ async def get_research_status(interaction_id: str) -> DeepResearchResult:
         usage=usage,
         raw_interaction=interaction,
     )
+
+
+async def research_followup(
+    previous_interaction_id: str,
+    query: str,
+    *,
+    model: str = "gemini-3-pro-preview",
+) -> str:
+    """
+    Ask a follow-up question about a completed Deep Research task.
+
+    This continues the conversation context from a previous research task,
+    allowing clarification, summarization, or elaboration on specific sections
+    without restarting the entire research.
+
+    Args:
+        previous_interaction_id: Interaction ID from a completed research task
+                                 (available as result.interaction_id from research_deep)
+        query: The follow-up question
+        model: Model to use for the follow-up. Default: "gemini-3-pro-preview"
+
+    Returns:
+        The text response to the follow-up question
+
+    Raises:
+        DeepResearchError: On invalid interaction ID or API errors
+    """
+    logger.info("💬 Follow-up question for %s: %s", previous_interaction_id, query[:100])
+    
+    client = genai.Client(api_key=get_api_key())
+
+    try:
+        interaction = await client.aio.interactions.create(
+            input=query,
+            model=model,
+            previous_interaction_id=previous_interaction_id,
+        )
+
+        # Extract text from the response
+        text = _extract_text_from_interaction(interaction)
+        
+        if not text:
+            # Try outputs directly
+            outputs = getattr(interaction, "outputs", [])
+            if outputs:
+                text = str(outputs[-1])
+
+        if not text:
+            raise DeepResearchError(
+                code="NO_RESPONSE",
+                message="No response received from follow-up",
+                details={"previous_interaction_id": previous_interaction_id},
+            )
+
+        logger.info("   ✅ Follow-up response received")
+        return text
+
+    except Exception as e:
+        logger.exception("Follow-up question failed: %s", e)
+        raise DeepResearchError(
+            code="FOLLOWUP_FAILED",
+            message=str(e),
+            details={"previous_interaction_id": previous_interaction_id},
+        ) from e
