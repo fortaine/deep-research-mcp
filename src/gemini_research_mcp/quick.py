@@ -28,7 +28,7 @@ from gemini_research_mcp.types import ResearchResult, Source
 if TYPE_CHECKING:
     from google.genai.types import GenerateContentResponse
 
-logger = logging.getLogger("deep-research-mcp")
+logger = logging.getLogger("gemini-research-mcp")
 
 
 def _extract_sources(response: GenerateContentResponse) -> tuple[list[Source], list[str]]:

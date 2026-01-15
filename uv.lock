@@ -407,7 +407,7 @@ tasks = [
 
 [[package]]
 name = "gemini-research-mcp"
-version = "3.0.0"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp", extra = ["tasks"] },

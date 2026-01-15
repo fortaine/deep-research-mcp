@@ -1,5 +1,5 @@
 """
-Data types for Deep Research MCP Server.
+Data types for Gemini Research MCP Server.
 """
 
 from __future__ import annotations

@@ -1,10 +1,13 @@
-"""
-Deep Research MCP Server
+"""Gemini Research MCP Server
 
-AI-powered research using Gemini grounding with MCP Tasks support.
+AI-powered research using Gemini:
+- research_quick: Fast grounded search (Gemini + Google Search)
+- research_deep: Comprehensive research (Deep Research Agent)
+- research_status: Check task status
+- research_followup: Continue conversation
 """
 
-__version__ = "2.3.0"
+__version__ = "0.1.0"
 
 from gemini_research_mcp.types import (
     DeepResearchError,

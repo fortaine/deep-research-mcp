@@ -37,7 +37,7 @@ from gemini_research_mcp.types import (
 if TYPE_CHECKING:
     pass
 
-logger = logging.getLogger("deep-research-mcp")
+logger = logging.getLogger("gemini-research-mcp")
 
 
 def _extract_usage(interaction: Any) -> DeepResearchUsage | None:
