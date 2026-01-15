@@ -17,7 +17,8 @@ from datetime import date
 
 # Default models - can be overridden via environment
 DEFAULT_MODEL = "gemini-2.5-flash"
-DEFAULT_DEEP_RESEARCH_AGENT = "gemini-2.5-pro-deep-research"
+# Interactions Deep Research agent name (preview; override via DEEP_RESEARCH_AGENT if needed)
+DEFAULT_DEEP_RESEARCH_AGENT = "deep-research-pro-preview-12-2025"
 
 # Thinking budget mapping (token counts for gemini-2.5-flash: 0-24576)
 THINKING_BUDGETS = {

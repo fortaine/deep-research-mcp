@@ -29,7 +29,7 @@ def log(msg: str) -> None:
     print(f"[{ts}] [{elapsed:6.1f}s] {msg}")
 
 
-async def test_deep_research(query: str) -> None:
+async def run_deep_research(query: str) -> None:
     """Test Deep Research API with streaming + polling."""
     
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
@@ -309,4 +309,4 @@ if __name__ == "__main__":
         query = " ".join(sys.argv[1:])
     
     START_TIME = time.time()
-    asyncio.run(test_deep_research(query))
+    asyncio.run(run_deep_research(query))

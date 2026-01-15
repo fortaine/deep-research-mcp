@@ -7,13 +7,17 @@ Run with: uv run pytest tests/ -v
 import pytest
 from datetime import date
 
-from deep_research_mcp.core import (
+from deep_research_mcp.config import (
     DEFAULT_MODEL,
     DEFAULT_THINKING_BUDGET,
     THINKING_BUDGETS,
-    _get_thinking_budget,
-    _default_system_prompt,
+    get_thinking_budget,
+    default_system_prompt,
 )
+
+# Aliases matching old test expectations
+_get_thinking_budget = get_thinking_budget
+_default_system_prompt = default_system_prompt
 
 
 class TestThinkingBudget:

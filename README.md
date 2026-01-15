@@ -48,7 +48,7 @@ GEMINI_API_KEY=your-api-key-here
 
 # Optional: Override default models
 GEMINI_MODEL=gemini-2.5-flash
-DEEP_RESEARCH_AGENT=gemini-2.5-pro-deep-research
+DEEP_RESEARCH_AGENT=deep-research-pro-preview-12-2025
 ```
 
 Get your key from https://aistudio.google.com/apikey

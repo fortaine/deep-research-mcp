@@ -13,14 +13,19 @@ import asyncio
 import os
 import sys
 
+import pytest
+
+pytestmark = pytest.mark.e2e
+
 # Add src to path for direct execution
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from deep_research_mcp.core import (
-    DeepResearchProgress,
-    deep_research_async,
-    deep_research_stream_async,
-)
+from deep_research_mcp.deep import deep_research, deep_research_stream
+from deep_research_mcp.types import DeepResearchProgress
+
+# Aliases for test compatibility
+deep_research_async = deep_research
+deep_research_stream_async = deep_research_stream
 
 
 async def test_streaming_raw():

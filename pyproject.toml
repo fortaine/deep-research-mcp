@@ -32,7 +32,7 @@ classifiers = [
 ]
 dependencies = [
     "google-genai>=1.57.0",
-    "fastmcp>=2.5.1",
+    "fastmcp[tasks]>=2.5.1",
     "httpx>=0.27.0",
     "python-dotenv>=1.0.0",
 ]
@@ -71,3 +71,12 @@ strict = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "-m 'not e2e'"
+markers = [
+    "e2e: end-to-end tests that call external APIs",
+]
+
+[tool.uv.sources]
+# Use FastMCP main branch locally to pick up the latest MCP Tasks support.
+# Packaging metadata (project.dependencies) still targets the latest released FastMCP.
+fastmcp = { git = "https://github.com/jlowin/fastmcp", rev = "main" }

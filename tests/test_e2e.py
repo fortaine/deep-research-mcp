@@ -30,9 +30,9 @@ class TestResearchQuickE2E:
     @pytest.mark.e2e
     async def test_basic_search(self):
         """Basic search should return grounded result with sources."""
-        from deep_research_mcp.core import quick_research_async
+        from deep_research_mcp.quick import quick_research
         
-        result = await quick_research_async(
+        result = await quick_research(
             "What is OMOP CDM version 5.4?",
             thinking_budget="minimal",
         )
@@ -46,9 +46,9 @@ class TestResearchQuickE2E:
     @pytest.mark.e2e
     async def test_site_filter(self):
         """Site filter should scope results to specific domain."""
-        from deep_research_mcp.core import quick_research_async
+        from deep_research_mcp.quick import quick_research
         
-        result = await quick_research_async(
+        result = await quick_research(
             "site:cloud.google.com BigQuery pricing",
             thinking_budget="minimal",
         )
@@ -62,10 +62,10 @@ class TestResearchQuickE2E:
     @pytest.mark.e2e
     async def test_system_prompt_affects_response(self):
         """Custom system prompt should affect response style."""
-        from deep_research_mcp.core import quick_research_async
+        from deep_research_mcp.quick import quick_research
         
         # Request JSON-style response
-        result = await quick_research_async(
+        result = await quick_research(
             "List 3 popular Python web frameworks",
             thinking_budget="minimal",
             system_instruction="Always respond with a numbered list. Be extremely brief, one line per item.",
@@ -136,9 +136,9 @@ class TestSourceExtraction:
     @pytest.mark.e2e
     async def test_sources_have_uri_and_title(self):
         """Extracted sources should have URI and title."""
-        from deep_research_mcp.core import quick_research_async
+        from deep_research_mcp.quick import quick_research
         
-        result = await quick_research_async(
+        result = await quick_research(
             "Python dataclasses documentation",
             thinking_budget="minimal",
         )
@@ -152,9 +152,9 @@ class TestSourceExtraction:
     @pytest.mark.e2e
     async def test_queries_are_captured(self):
         """Search queries used by model should be captured."""
-        from deep_research_mcp.core import quick_research_async
+        from deep_research_mcp.quick import quick_research
         
-        result = await quick_research_async(
+        result = await quick_research(
             "latest Python release version",
             thinking_budget="minimal",
         )
