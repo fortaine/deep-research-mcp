@@ -130,12 +130,11 @@ def _format_deep_research_report(
 async def research_web(
     query: Annotated[str, "Search query or question to research on the web"],
     include_thoughts: Annotated[bool, "Include thinking summary in response"] = False,
-    thinking_level: Annotated[
-        str, "Thinking depth: 'minimal', 'low', 'medium', 'high' (default)"
-    ] = "high",
 ) -> str:
     """
     Fast web research with Gemini grounding. Returns answer with citations in seconds.
+
+    Always uses thorough reasoning (thinking_level=high) for quality results.
 
     Use for: quick lookups, fact-checking, current events, documentation, "what is",
     "how to", real-time information, news, API references, error messages.
@@ -143,7 +142,6 @@ async def research_web(
     Args:
         query: Search query or question to research
         include_thoughts: Include thinking summary in response
-        thinking_level: Thinking depth level
 
     Returns:
         Research results with sources as markdown text
@@ -154,7 +152,6 @@ async def research_web(
     try:
         result = await quick_research(
             query=query,
-            thinking_level=thinking_level,
             include_thoughts=include_thoughts,
         )
         elapsed = time.time() - start
