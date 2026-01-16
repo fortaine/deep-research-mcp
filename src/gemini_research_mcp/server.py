@@ -2,9 +2,8 @@
 Gemini Research MCP Server
 
 Provides AI-powered research tools via Gemini:
-- research_quick: Fast grounded search (5-30 seconds) - Gemini + Google Search
+- research_web: Fast grounded web search (5-30 seconds) - Gemini + Google Search
 - research_deep: Comprehensive multi-step research (3-20 minutes) - Deep Research Agent
-- research_status: Check status of deep research tasks
 - research_followup: Ask follow-up questions about completed research
 
 Architecture:
@@ -18,7 +17,7 @@ Architecture:
 import asyncio
 import logging
 import time
-from typing import Annotated, Optional
+from typing import Annotated
 
 from fastmcp import FastMCP
 from fastmcp.dependencies import Progress
@@ -26,12 +25,14 @@ from fastmcp.server.tasks import TaskConfig
 
 from gemini_research_mcp import __version__
 from gemini_research_mcp.citations import process_citations
-from gemini_research_mcp.deep import deep_research_stream, get_research_status, research_followup as _research_followup
+from gemini_research_mcp.config import LOGGER_NAME
+from gemini_research_mcp.deep import deep_research_stream, get_research_status
+from gemini_research_mcp.deep import research_followup as _research_followup
 from gemini_research_mcp.quick import quick_research
 from gemini_research_mcp.types import DeepResearchError, DeepResearchResult
 
 # Configure logging
-logger = logging.getLogger("gemini-research-mcp")
+logger = logging.getLogger(LOGGER_NAME)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -42,14 +43,14 @@ logging.basicConfig(
 # =============================================================================
 
 mcp = FastMCP(
-    name="gemini-research",
+    name="Gemini Research",
     instructions="""
 Gemini Research MCP Server - AI-powered research toolkit
 
-This server provides four tools for different research needs:
+This server provides three tools for different research needs:
 
-## Quick Research (research_quick)
-Fast web search with Gemini grounding (5-30 seconds)
+## Web Search (research_web)
+Fast web research with Gemini grounding (5-30 seconds)
 - Uses: Gemini 2.5 Flash + Google Search grounding
 - Best for: Quick lookups, fact-checking, current events, documentation
 - Returns: Immediate results with citations
@@ -58,21 +59,18 @@ Fast web search with Gemini grounding (5-30 seconds)
 Comprehensive autonomous research (3-20 minutes)
 - Uses: Gemini Deep Research Agent (Interactions API)
 - Best for: Complex questions, research reports, competitive analysis
-- Runs as: Background task with progress updates
+- Runs as: Background task with progress updates (requires MCP Tasks support)
 - Optional: Search your own data with file_search_store_names
 
-## Status Check (research_status)
-Check on ongoing or completed Deep Research tasks
-- Provide the interaction_id from research_deep
-- Returns: Current status and results if complete
-
 ## Follow-up (research_followup)
-Continue the conversation after Deep Research completes
+Continue conversation after Deep Research completes
 - Ask for clarification, elaboration, or summarization
 - Avoids restarting the entire research task
 
-**Workflow:** Use research_quick first for simple questions. If deeper 
+**Workflow:** Use research_web first for simple questions. If deeper 
 investigation is needed, escalate to research_deep.
+
+**Note:** This server requires MCP Tasks support (SEP-1732) for research_deep.
 """,
 )
 
@@ -91,7 +89,9 @@ def _format_duration(seconds: float) -> str:
     return f"{minutes}m {secs}s"
 
 
-def _format_deep_research_report(result: DeepResearchResult, interaction_id: str, elapsed: float) -> str:
+def _format_deep_research_report(
+    result: DeepResearchResult, interaction_id: str, elapsed: float
+) -> str:
     """Format a deep research result into a markdown report."""
     lines = ["## Research Report"]
 
@@ -109,12 +109,14 @@ def _format_deep_research_report(result: DeepResearchResult, interaction_id: str
             lines.append(f"- Estimated cost: ${result.usage.total_cost:.4f}")
 
     # Duration
-    lines.extend([
-        "",
-        "---",
-        f"- Duration: {_format_duration(elapsed)}",
-        f"- Interaction ID: `{interaction_id}`",
-    ])
+    lines.extend(
+        [
+            "",
+            "---",
+            f"- Duration: {_format_duration(elapsed)}",
+            f"- Interaction ID: `{interaction_id}`",
+        ]
+    )
 
     return "\n".join(lines)
 
@@ -124,33 +126,35 @@ def _format_deep_research_report(result: DeepResearchResult, interaction_id: str
 # =============================================================================
 
 
-@mcp.tool
-async def research_quick(
-    query: Annotated[str, "Research question or topic to search for"],
+@mcp.tool(annotations={"readOnlyHint": True})
+async def research_web(
+    query: Annotated[str, "Search query or question to research on the web"],
     include_thoughts: Annotated[bool, "Include thinking summary in response"] = False,
-    thinking_budget: Annotated[str, "Thinking depth: 'minimal', 'low', 'medium' (default), 'high', 'max', 'dynamic'"] = "medium",
+    thinking_level: Annotated[
+        str, "Thinking depth: 'minimal', 'low', 'medium', 'high' (default)"
+    ] = "high",
 ) -> str:
     """
-    Fast web research using Gemini grounded search.
+    Fast web research with Gemini grounding. Returns answer with citations in seconds.
 
-    Returns answer with citations in 5-30 seconds.
-    Best for: fact-checking, quick lookups, current events, documentation searches.
+    Use for: quick lookups, fact-checking, current events, documentation, "what is",
+    "how to", real-time information, news, API references, error messages.
 
     Args:
-        query: Research question or topic to search for
+        query: Search query or question to research
         include_thoughts: Include thinking summary in response
-        thinking_budget: Thinking depth level
+        thinking_level: Thinking depth level
 
     Returns:
         Research results with sources as markdown text
     """
-    logger.info("🔎 research_quick: %s", query[:100])
+    logger.info("🔎 research_web: %s", query[:100])
     start = time.time()
 
     try:
         result = await quick_research(
             query=query,
-            thinking_budget=thinking_budget,
+            thinking_level=thinking_level,
             include_thoughts=include_thoughts,
         )
         elapsed = time.time() - start
@@ -181,40 +185,44 @@ async def research_quick(
             lines.extend(["", "### Thinking Summary", result.thinking_summary])
 
         # Metadata
-        lines.extend([
-            "",
-            "---",
-            f"*Completed in {_format_duration(elapsed)}*",
-        ])
+        lines.extend(
+            [
+                "",
+                "---",
+                f"*Completed in {_format_duration(elapsed)}*",
+            ]
+        )
 
         return "\n".join(lines)
 
     except Exception as e:
-        logger.exception("research_quick failed: %s", e)
+        logger.exception("research_web failed: %s", e)
         return f"❌ Research failed: {e}"
 
 
-@mcp.tool(task=TaskConfig(mode="required"))
+@mcp.tool(task=TaskConfig(mode="required"), annotations={"readOnlyHint": True})
 async def research_deep(
     query: Annotated[str, "Research question or complex topic requiring thorough investigation"],
-    format_instructions: Annotated[Optional[str], "Optional instructions for report format (e.g., 'include comparison table')"] = None,
-    file_search_store_names: Annotated[Optional[list[str]], "Optional list of Gemini File Search store names for RAG (e.g., ['fileSearchStores/my-store'])"] = None,
-    progress: Progress = Progress(),
+    format_instructions: Annotated[
+        str | None, "Optional instructions for report format (e.g., 'include comparison table')"
+    ] = None,
+    file_search_store_names: Annotated[
+        list[str] | None,
+        "Optional list of Gemini File Search store names for RAG",
+    ] = None,
+    progress: Progress = Progress(),  # noqa: B008
 ) -> str:
     """
-    Comprehensive multi-step research using Gemini Deep Research Agent.
+    Deep research agent for complex questions. Autonomously investigates and writes reports.
 
-    Autonomously plans, searches multiple sources, reads pages, and synthesizes
-    a detailed report. Takes 3-20 minutes.
-
-    Best for: complex questions, research reports, comparative analysis.
-
-    This tool runs as a background task. Progress updates will be sent during execution.
+    Use for: research reports, literature review, competitive analysis, "compare X vs Y",
+    "analyze", "investigate", "deep dive", "comprehensive", multi-source synthesis.
+    Takes 3-20 minutes. Runs as background task with progress updates.
 
     Args:
         query: Research question or complex topic
         format_instructions: Optional formatting instructions for the report
-        file_search_store_names: Optional list of file search store names for searching your own data
+        file_search_store_names: Optional list of file search store names
         progress: Progress tracker (injected by FastMCP)
 
     Returns:
@@ -251,14 +259,16 @@ async def research_deep(
             if event.event_type == "thought":
                 thought_count += 1
                 # Display thought content (truncated to 55 chars) for transparency
-                short_thought = (event.content[:55] + "...") if event.content and len(event.content) > 55 else (event.content or "")
+                content = event.content or ""
+                short_thought = content[:55] + "..." if len(content) > 55 else content
                 await progress.set_message(f"[{thought_count}] 🧠 {short_thought}")
                 # Progress: cap at 50% during thinking phase
                 await progress.increment(min(2, 50 - thought_count * 2))
             elif event.event_type == "action":
                 action_count += 1
                 # Display action content (e.g., search query) for transparency
-                short_action = (event.content[:55] + "...") if event.content and len(event.content) > 55 else (event.content or "")
+                content = event.content or ""
+                short_action = content[:55] + "..." if len(content) > 55 else content
                 await progress.set_message(f"[{action_count}] 🔍 {short_action}")
             elif event.event_type == "start":
                 await progress.set_message("🚀 Research agent autonomous investigation started")
@@ -281,7 +291,7 @@ async def research_deep(
 
             raw_status = "unknown"
             if result.raw_interaction:
-                raw_status = getattr(result.raw_interaction, 'status', 'unknown')
+                raw_status = getattr(result.raw_interaction, "status", "unknown")
 
             elapsed = time.time() - start
 
@@ -302,7 +312,8 @@ async def research_deep(
             else:
                 # Still working - update progress (cap at 90%)
                 progress_pct = min(90, int(50 + (elapsed / max_wait) * 40))
-                await progress.set_message(f"⏳ Researching... ({_format_duration(elapsed)}, ~{progress_pct}%)")
+                msg = f"⏳ Researching... ({_format_duration(elapsed)}, ~{progress_pct}%)"
+                await progress.set_message(msg)
 
             # Wait before next poll
             await asyncio.sleep(poll_interval)
@@ -311,7 +322,10 @@ async def research_deep(
         elapsed = time.time() - start
         raise DeepResearchError(
             code="TIMEOUT",
-            message=f"Research timed out after {_format_duration(elapsed)}. Check status with research_status.",
+            message=(
+                f"Research timed out after {_format_duration(elapsed)}. "
+                f"Interaction ID: {interaction_id}"
+            ),
             details={"interaction_id": interaction_id},
         )
 
@@ -325,75 +339,23 @@ async def research_deep(
         ) from e
 
 
-@mcp.tool
-async def research_status(
-    interaction_id: Annotated[str, "The interaction_id from a previous research_deep call"],
-) -> str:
-    """
-    Check the status of a Deep Research task or retrieve results from a completed task.
-
-    Use this to check on ongoing research or to re-fetch results from a previous session.
-
-    Args:
-        interaction_id: The interaction_id from research_deep
-
-    Returns:
-        Current status and results if complete
-    """
-    logger.info("📊 research_status: %s", interaction_id)
-
-    try:
-        result = await get_research_status(interaction_id)
-
-        raw_status = "unknown"
-        if result.raw_interaction:
-            raw_status = getattr(result.raw_interaction, 'status', 'unknown')
-
-        lines = [f"## Research Status: {raw_status.upper()}"]
-        lines.append("")
-        lines.append(f"**Interaction ID:** `{interaction_id}`")
-
-        if raw_status == "completed":
-            result = await process_citations(result, resolve_urls=True)
-
-            if result.text:
-                lines.extend(["", "## Report", result.text])
-
-            if result.usage:
-                lines.extend(["", "## Usage"])
-                if result.usage.total_tokens:
-                    lines.append(f"- Total tokens: {result.usage.total_tokens}")
-                if result.usage.total_cost:
-                    lines.append(f"- Estimated cost: ${result.usage.total_cost:.4f}")
-
-            if result.duration_seconds:
-                lines.append(f"- Duration: {_format_duration(result.duration_seconds)}")
-
-        elif raw_status in ("failed", "cancelled"):
-            lines.append(f"\n⚠️ Research {raw_status}. No results available.")
-
-        else:
-            lines.append("\n⏳ Research still in progress. Check again later.")
-
-        return "\n".join(lines)
-
-    except Exception as e:
-        logger.exception("research_status failed: %s", e)
-        return f"❌ Error checking status: {e}"
-
-
-@mcp.tool
+@mcp.tool(annotations={"readOnlyHint": True})
 async def research_followup(
-    previous_interaction_id: Annotated[str, "The interaction_id from a completed research_deep task"],
-    query: Annotated[str, "Follow-up question about the research (e.g., 'elaborate on the second point')"],
-    model: Annotated[str, "Model to use for follow-up. Default: gemini-3-pro-preview"] = "gemini-3-pro-preview",
+    previous_interaction_id: Annotated[
+        str, "The interaction_id from a completed research_deep task"
+    ],
+    query: Annotated[
+        str, "Follow-up question about the research (e.g., 'elaborate on the second point')"
+    ],
+    model: Annotated[
+        str, "Model to use for follow-up. Default: gemini-3-pro-preview"
+    ] = "gemini-3-pro-preview",
 ) -> str:
     """
-    Ask a follow-up question about completed Deep Research.
+    Continue conversation after deep research. Ask follow-up questions without restarting.
 
-    Continue the conversation after research completes to get clarification,
-    summarization, or elaboration on specific sections without restarting
-    the entire research task.
+    Use for: "clarify", "elaborate", "summarize", "explain more", "what about",
+    continue discussion, ask more questions about completed research results.
 
     Args:
         previous_interaction_id: The interaction_id from research_deep

@@ -11,18 +11,19 @@ import asyncio
 import inspect
 import logging
 import time
-from collections.abc import AsyncIterator, Awaitable
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Any
 
 from google import genai
 
 from gemini_research_mcp.citations import process_citations
 from gemini_research_mcp.config import (
+    DEFAULT_TIMEOUT,
+    LOGGER_NAME,
     MAX_INITIAL_RETRIES,
     MAX_POLL_TIME,
     RECONNECT_DELAY,
     STREAM_POLL_INTERVAL,
-    DEFAULT_TIMEOUT,
     get_api_key,
     get_deep_research_agent,
     is_retryable_error,
@@ -34,10 +35,7 @@ from gemini_research_mcp.types import (
     DeepResearchUsage,
 )
 
-if TYPE_CHECKING:
-    pass
-
-logger = logging.getLogger("gemini-research-mcp")
+logger = logging.getLogger(LOGGER_NAME)
 
 
 def _extract_usage(interaction: Any) -> DeepResearchUsage | None:
@@ -186,7 +184,8 @@ async def deep_research_stream(
             if chunk.event_type == "content.delta":
                 delta = chunk.delta
                 if delta.type == "thought_summary":
-                    thought_text = delta.content.text if hasattr(delta.content, "text") else str(delta.content)
+                    content = delta.content
+                    thought_text = content.text if hasattr(content, "text") else str(content)
                     logger.debug("[%.1fs] 🧠 thought_summary", elapsed)
                     yield DeepResearchProgress(
                         event_type="thought",
@@ -204,8 +203,11 @@ async def deep_research_stream(
                     )
 
             elif chunk.event_type == "interaction.complete":
-                interaction_status = getattr(getattr(chunk, "interaction", None), "status", "unknown")
-                logger.info("[%.1fs] ✅ interaction.complete (status=%s)", elapsed, interaction_status)
+                interaction = getattr(chunk, "interaction", None)
+                interaction_status = getattr(interaction, "status", "unknown")
+                logger.info(
+                    "[%.1fs] ✅ interaction.complete (status=%s)", elapsed, interaction_status
+                )
 
                 if interaction_status == "completed":
                     is_complete = True
@@ -215,7 +217,11 @@ async def deep_research_stream(
                         event_id=last_event_id,
                     )
                 else:
-                    logger.warning("[%.1fs] ⚠️ interaction.complete but status='%s'", elapsed, interaction_status)
+                    logger.warning(
+                        "[%.1fs] ⚠️ interaction.complete but status='%s'",
+                        elapsed,
+                        interaction_status,
+                    )
 
             elif chunk.event_type == "error":
                 is_complete = True
@@ -254,12 +260,14 @@ async def deep_research_stream(
                 await asyncio.sleep(RECONNECT_DELAY)
                 continue
             disconnect_count += 1
-            logger.warning("⏱️ [%.1fs] ❌ DISCONNECT #%d: %s", time.time() - stream_start_time, disconnect_count, e)
+            elapsed_t = time.time() - stream_start_time
+            logger.warning("⏱️ [%.1fs] ❌ DISCONNECT #%d: %s", elapsed_t, disconnect_count, e)
             break
 
         except Exception as e:
             disconnect_count += 1
-            logger.warning("⏱️ [%.1fs] ❌ DISCONNECT #%d: %s", time.time() - stream_start_time, disconnect_count, e)
+            elapsed_t = time.time() - stream_start_time
+            logger.warning("⏱️ [%.1fs] ❌ DISCONNECT #%d: %s", elapsed_t, disconnect_count, e)
             break
 
     # Reconnection loop
@@ -282,7 +290,8 @@ async def deep_research_stream(
                 retry_count = 0
         except Exception as e:
             disconnect_count += 1
-            logger.warning("⏱️ [%.1fs] DISCONNECT #%d: %s", time.time() - stream_start_time, disconnect_count, e)
+            elapsed_t = time.time() - stream_start_time
+            logger.warning("⏱️ [%.1fs] DISCONNECT #%d: %s", elapsed_t, disconnect_count, e)
             retry_delay = min(retry_delay * 1.5, 30.0)
 
     if not is_complete:
@@ -490,7 +499,7 @@ async def research_followup(
         DeepResearchError: On invalid interaction ID or API errors
     """
     logger.info("💬 Follow-up question for %s: %s", previous_interaction_id, query[:100])
-    
+
     client = genai.Client(api_key=get_api_key())
 
     try:
@@ -502,7 +511,7 @@ async def research_followup(
 
         # Extract text from the response
         text = _extract_text_from_interaction(interaction)
-        
+
         if not text:
             # Try outputs directly
             outputs = getattr(interaction, "outputs", [])

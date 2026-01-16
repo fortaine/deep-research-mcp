@@ -2,13 +2,20 @@
 
 AI-powered research using Gemini:
 - research_quick: Fast grounded search (Gemini + Google Search)
-- research_deep: Comprehensive research (Deep Research Agent)
-- research_status: Check task status
-- research_followup: Continue conversation
+- research_deep: Comprehensive research (Deep Research Agent, requires MCP Tasks)
+- research_followup: Continue conversation after research completes
 """
 
 __version__ = "0.1.0"
 
+from gemini_research_mcp.citations import process_citations
+from gemini_research_mcp.deep import (
+    deep_research,
+    deep_research_stream,
+    research_followup,
+)
+from gemini_research_mcp.quick import quick_research
+from gemini_research_mcp.server import main, mcp
 from gemini_research_mcp.types import (
     DeepResearchError,
     DeepResearchProgress,
@@ -17,17 +24,7 @@ from gemini_research_mcp.types import (
     ParsedCitation,
     ResearchResult,
     Source,
-    VendorDocsResult,
 )
-from gemini_research_mcp.quick import quick_research
-from gemini_research_mcp.deep import (
-    deep_research,
-    deep_research_stream,
-    get_research_status,
-    research_followup,
-)
-from gemini_research_mcp.citations import process_citations
-from gemini_research_mcp.server import main, mcp
 
 __all__ = [
     "__version__",
@@ -38,11 +35,9 @@ __all__ = [
     "ParsedCitation",
     "ResearchResult",
     "Source",
-    "VendorDocsResult",
     "quick_research",
     "deep_research",
     "deep_research_stream",
-    "get_research_status",
     "research_followup",
     "process_citations",
     "main",

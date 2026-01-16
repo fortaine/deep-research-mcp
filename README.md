@@ -8,15 +8,14 @@ MCP server for AI-powered research using **Gemini**. Combines fast grounded sear
 
 | Tool | Description | Latency | API Used |
 |------|-------------|---------|----------|
-| `research_quick` | Fast web search with citations | 5-30 sec | Gemini + Google Search grounding |
+| `research_web` | Fast web search with citations | 5-30 sec | Gemini 3 Flash + Google Search grounding |
 | `research_deep` | Multi-step autonomous research | 3-20 min | Deep Research Agent (Interactions API) |
-| `research_status` | Check status of background tasks | instant | Interactions API |
 | `research_followup` | Continue conversation after research | 5-30 sec | Interactions API |
 
 ### Workflow
 
 ```
-research_quick  ─── quick lookup ───▶  Got what you need?  ── yes ──▶ Done
+research_web  ─── quick lookup ───▶  Got what you need?  ── yes ──▶ Done
        │                                        │
        │                                       no
        │                                        ▼
@@ -35,14 +34,6 @@ research_quick  ─── quick lookup ───▶  Got what you need?  ── 
 
 ## Installation
 
-### From PyPI
-
-```bash
-pip install gemini-research-mcp
-# or
-uv add gemini-research-mcp
-```
-
 ### From Source
 
 ```bash
@@ -51,24 +42,54 @@ cd gemini-research-mcp
 uv sync
 ```
 
-## Configuration
+### From PyPI (future)
 
 ```bash
-# Required
-GEMINI_API_KEY=your-api-key-here
-
-# Optional: Override default models
-GEMINI_MODEL=gemini-2.5-flash
-DEEP_RESEARCH_AGENT=deep-research-pro-preview-12-2025
+pip install gemini-research-mcp
+# or
+uv add gemini-research-mcp
 ```
 
-Get your key from https://aistudio.google.com/apikey
+## Configuration
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `GEMINI_API_KEY` | **Yes** | — | Google AI Studio API key |
+| `GEMINI_MODEL` | No | `gemini-3-flash-preview` | Model for `research_web` |
+| `DEEP_RESEARCH_AGENT` | No | `deep-research-pro-preview-12-2025` | Agent for `research_deep` |
+
+Get your API key from https://aistudio.google.com/apikey
+
+### Environment File
+
+Create `.env` from the template:
+
+```bash
+cp .env.example .env
+# Edit .env with your API key
+```
 
 ## Usage
 
-### VS Code (Recommended)
+### VS Code MCP (Recommended)
 
 Add to `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "gemini-research": {
+      "command": "uv",
+      "args": ["--directory", "path/to/mcp-server", "run", "gemini-research-mcp"],
+      "envFile": "${workspaceFolder}/path/to/mcp-server/.env"
+    }
+  }
+}
+```
+
+Or use uvx (no install needed):
 
 ```json
 {
@@ -87,8 +108,8 @@ Add to `.vscode/mcp.json`:
 ### Command Line
 
 ```bash
-# After pip install
-gemini-research-mcp
+# After uv sync
+uv run gemini-research-mcp
 
 # Or with uvx (no install needed)
 uvx gemini-research-mcp
@@ -96,21 +117,49 @@ uvx gemini-research-mcp
 
 ## Architecture
 
-- **Transport**: stdio (VS Code spawns as child process)
-- **Tasks**: [MCP Tasks](https://spec.modelcontextprotocol.io/specification/draft/server/tasks/) (SEP-1732) for `research_deep`
-- **Framework**: [FastMCP](https://github.com/jlowin/fastmcp) 2.5+
+### Transport: stdio
 
-## Module Structure
+The server uses **stdio transport** (VS Code spawns it as a child process):
+
+```python
+mcp.run(transport="stdio")
+```
+
+**Why stdio over HTTP?**
+
+| Aspect | stdio | HTTP |
+|--------|-------|------|
+| VS Code integration | ✅ Native | ⚠️ Needs URL config |
+| Latency | Microseconds | Milliseconds |
+| Configuration | Zero | Complex (ports, SSL, auth) |
+| Security | Process isolation | Network exposure risk |
+| Concurrency | Single client | Multiple clients |
+
+For this use case (single developer, VS Code MCP), stdio is optimal. The 5-30 second Gemini API latency dominates; transport overhead is negligible.
+
+### MCP Tasks (SEP-1732)
+
+`research_deep` uses [MCP Tasks](https://spec.modelcontextprotocol.io/specification/draft/server/tasks/) for background execution with real-time progress:
+
+```python
+@mcp.tool(task=TaskConfig(mode="required"))
+async def research_deep(..., progress: Progress):
+    await progress.set_message("Researching...")
+    await progress.increment(10)
+```
+
+### Module Structure
 
 ```
-gemini_research_mcp/
+src/gemini_research_mcp/
 ├── __init__.py     # Package exports
 ├── server.py       # MCP server (FastMCP tools)
 ├── config.py       # Configuration management
 ├── types.py        # Data types and exceptions
-├── quick.py        # Quick research (grounded search)
-├── deep.py         # Deep research (multi-step agent)
-└── citations.py    # Citation extraction and URL resolution
+├── quick.py        # research_web (grounded search)
+├── deep.py         # research_deep (multi-step agent)
+├── citations.py    # Citation extraction and URL resolution
+└── py.typed        # PEP 561 type marker
 ```
 
 ## Development
@@ -122,14 +171,44 @@ uv run mypy src/
 uv run ruff check src/
 ```
 
+### Tests
+
+```bash
+# Unit tests only (no API calls)
+uv run pytest
+
+# With coverage report
+uv run pytest --cov=src/gemini_research_mcp --cov-report=term-missing
+
+# Include E2E tests (requires GEMINI_API_KEY)
+uv run pytest -m e2e
+```
+
 ## Why "Gemini Research"?
 
 This server provides two distinct research capabilities:
 
-1. **research_quick** - Uses Gemini Flash + Google Search grounding (NOT Deep Research)
-2. **research_deep** - Uses Gemini Deep Research Agent
+1. **research_web** - Uses Gemini 3 Flash + Google Search grounding (fast, ~10s)
+2. **research_deep** - Uses Gemini Deep Research Agent (comprehensive, ~5-15min)
 
-The name "gemini-research-mcp" accurately reflects that both tools are Gemini-powered research capabilities, rather than implying everything uses Deep Research.
+### Thinking Configuration
+
+Use `thinking_level` parameter:
+- `minimal` - Minimize latency (chat/high-throughput)
+- `low` - Balance speed and quality  
+- `medium` - Good reasoning depth
+- `high` - Maximum reasoning (default, recommended for research)
+
+The name "gemini-research-mcp" accurately reflects that both tools are Gemini-powered research capabilities.
+
+## Pricing Estimate
+
+| Tool | Typical Cost |
+|------|-------------|
+| `research_web` | ~$0.01-0.05 per query |
+| `research_deep` | ~$2-5 per task |
+
+*Deep Research uses ~80-160 searches and ~250k-900k tokens per task.*
 
 ## License
 

@@ -7,7 +7,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-
 # =============================================================================
 # Exceptions
 # =============================================================================
@@ -130,11 +129,12 @@ class DeepResearchResult:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
+        citations = [c.to_dict() for c in self.parsed_citations] if self.parsed_citations else []
         return {
             "id": self.interaction_id,
             "text": self.text,
             "text_without_sources": self.text_without_sources,
-            "citations": [c.to_dict() for c in self.parsed_citations] if self.parsed_citations else [],
+            "citations": citations,
             "thinking_summaries": self.thinking_summaries,
             "usage": self.usage.to_dict() if self.usage else None,
             "duration_seconds": self.duration_seconds,
@@ -148,31 +148,19 @@ class DeepResearchProgress:
     event_type: str  # "start", "thought", "text", "complete", "error", "status"
     content: str | None = None
     interaction_id: str | None = None
+    event_id: str | None = None  # For stream resumption after disconnection
     event_id: str | None = None
 
 
 # =============================================================================
-# Vendor Docs
-# =============================================================================
-
-
-@dataclass(slots=True)
-class VendorDocsResult:
-    """Result from vendor_docs_external_api_async."""
-
-    text: str
-    sources: list[Source] = field(default_factory=list)
-    search_queries: list[str] = field(default_factory=list)
-
-
-# =============================================================================
 # File Search Store (RAG)
+# TODO: These types are defined for future use with file search capabilities
 # =============================================================================
 
 
 @dataclass(frozen=True, slots=True)
 class FileSearchStore:
-    """A file search store for RAG."""
+    """A file search store for RAG (future use)."""
 
     name: str
     display_name: str | None = None
@@ -180,7 +168,7 @@ class FileSearchStore:
 
 @dataclass(frozen=True, slots=True)
 class FileSearchDocument:
-    """A document in a file search store."""
+    """A document in a file search store (future use)."""
 
     name: str
     display_name: str | None = None
