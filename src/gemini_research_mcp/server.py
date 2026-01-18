@@ -7,23 +7,24 @@ Provides AI-powered research tools via Gemini:
 - research_followup: Ask follow-up questions about completed research
 
 Architecture:
-- FastMCP with task=True for background task support (MCP Tasks / SEP-1732)
-- Progress dependency for real-time progress reporting
+- MCP SDK with experimental task support for background tasks (MCP Tasks / SEP-1732)
+- ServerTaskContext for elicitation during background tasks (input_required pattern)
+- Progress reporting via task status updates
 """
 
 # NOTE: Do NOT use `from __future__ import annotations` with FastMCP/Pydantic
 # as it breaks type resolution for Annotated parameters in tool functions
 
 import asyncio
-import contextlib
 import logging
 import time
-from typing import Annotated
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Annotated, Any
 
-from fastmcp import Context, FastMCP
-from fastmcp.dependencies import Depends, Progress
-from fastmcp.server.sampling import SamplingTool
-from fastmcp.server.tasks import TaskConfig
+from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.experimental.task_support import TaskSupport
+from mcp.types import ToolAnnotations
 from pydantic import BaseModel, Field
 
 from gemini_research_mcp import __version__
@@ -43,31 +44,32 @@ logging.basicConfig(
 
 
 # =============================================================================
-# Optional Context Dependency (for background task compatibility)
+# Task Support Configuration
 # =============================================================================
 
-from collections.abc import AsyncGenerator
+# Global TaskSupport instance for the server
+_task_support: TaskSupport | None = None
 
 
-@contextlib.asynccontextmanager
-async def _optional_context() -> AsyncGenerator[Context | None, None]:
-    """
-    Provide Context if available, None otherwise.
-
-    Unlike CurrentContext which raises RuntimeError when no context exists,
-    this dependency gracefully returns None when running in background tasks.
-    """
-    try:
-        from fastmcp.server.context import _current_context
-
-        ctx = _current_context.get()
-        yield ctx  # May be None
-    except Exception:
-        yield None
+def get_task_support() -> TaskSupport:
+    """Get the task support instance."""
+    if _task_support is None:
+        raise RuntimeError("TaskSupport not initialized. Server must be started with lifespan.")
+    return _task_support
 
 
-# Dependency marker for optional context
-OptionalContext = _optional_context
+@asynccontextmanager
+async def lifespan(app: FastMCP) -> AsyncIterator[None]:
+    """Initialize task support during server startup."""
+    global _task_support
+
+    # Enable experimental task support on the low-level server
+    _task_support = app._mcp_server.experimental.enable_tasks()
+
+    logger.info("✅ Experimental task support enabled")
+
+    async with _task_support.run():
+        yield
 
 
 # =============================================================================
@@ -98,6 +100,7 @@ Use for: "elaborate", "clarify", "summarize", follow-up questions.
 - Simple questions → research_web
 - Complex questions → research_deep (handles everything automatically)
 """,
+    lifespan=lifespan,
 )
 
 
@@ -157,7 +160,7 @@ def _format_deep_research_report(
 # =============================================================================
 
 
-@mcp.tool(annotations={"readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def research_web(
     query: Annotated[str, "Search query or question to research on the web"],
     include_thoughts: Annotated[bool, "Include thinking summary in response"] = False,
@@ -229,211 +232,33 @@ async def research_web(
 
 
 # =============================================================================
-# SEP-1577 Sampling with Tools - Clarification via ctx.sample()
+# SEP-1686: Elicitation via Context.elicit()
 # =============================================================================
 #
-# This implements the "Sampling with Tools" pattern from SEP-1577:
-# - The LLM can call internal tools during sampling to gather information
-# - Tools run within the sampling loop where Context is STILL available
-# - This allows elicitation BEFORE background task spawns
+# The MCP SDK's FastMCP Context supports elicitation directly via ctx.elicit().
+# This works in foreground (non-task) mode. For background tasks (SEP-1732),
+# the ServerTaskContext provides elicit() with input_required status management.
 #
-# Requires: chat.mcp.serverSampling enabled for this server in VS Code settings
+# Current implementation: Foreground elicitation via ctx.elicit()
+# TODO: Background task elicitation via ServerTaskContext when client supports it
 
 
-class AnalyzedQuery(BaseModel):
-    """Result from sampling-based query analysis."""
+class ClarificationSchema(BaseModel):
+    """Schema for clarification question answers."""
 
-    refined_query: str = Field(description="The refined research query to use")
-    was_clarified: bool = Field(description="Whether clarifying questions were asked")
-    summary: str = Field(description="Brief summary of what was refined")
-
-
-# Context holder for sampling tools (passed via closure)
-_clarification_context: Context | None = None
-
-
-async def _ask_clarifying_questions(
-    questions: list[str],
-    original_query: str,
-) -> str:
-    """
-    Internal sampling tool: Present clarifying questions to user via elicitation.
-
-    This tool is called by the LLM during ctx.sample() when it determines
-    that the query needs clarification. The Context is still available here
-    because we're inside the sampling loop (foreground), not in a background task.
-
-    Args:
-        questions: List of clarifying questions to ask
-        original_query: The original research query for context
-
-    Returns:
-        Concatenated answers from user, or empty string if skipped
-    """
-    global _clarification_context
-    ctx = _clarification_context
-
-    if ctx is None:
-        logger.warning("No context available for clarification")
-        return ""
-
-    logger.info("   🎯 Sampling tool: asking %d clarifying questions", len(questions))
-
-    # Build dynamic schema for elicitation
-    field_definitions: dict[str, tuple] = {}
-    for i, question in enumerate(questions[:5]):  # Cap at 5 questions
-        field_name = f"answer_{i + 1}"
-        field_definitions[field_name] = (
-            str,
-            Field(default="", description=question),
-        )
-
-    DynamicSchema = type(
-        "ClarificationQuestions",
-        (BaseModel,),
-        {"__annotations__": {k: v[0] for k, v in field_definitions.items()}}
-        | {k: v[1] for k, v in field_definitions.items()},
-    )
-
-    try:
-        message = (
-            f"To improve research quality for:\n\n**\"{original_query}\"**\n\n"
-            f"Please answer these questions (optional - press 'Skip' to continue):"
-        )
-
-        result = await ctx.elicit(message=message, response_type=DynamicSchema)
-
-        if result.action == "accept" and result.data:
-            data = result.data if isinstance(result.data, dict) else result.data.model_dump()
-            answers = [data.get(f"answer_{i + 1}", "") for i in range(len(questions))]
-            non_empty = [a for a in answers if a.strip()]
-            logger.info("   ✨ User provided %d/%d answers", len(non_empty), len(questions))
-            return "\n".join(f"Q: {q}\nA: {a}" for q, a in zip(questions, answers, strict=False) if a.strip())
-        else:
-            logger.info("   ⏭️ User skipped clarification")
-            return ""
-
-    except Exception as e:
-        logger.warning("   ⚠️ Elicitation failed: %s", e)
-        return ""
-
-
-# Create SamplingTool for use with ctx.sample()
-_clarify_tool = SamplingTool(
-    name="ask_clarifying_questions",
-    description=(
-        "Ask the user clarifying questions to refine a vague research query. "
-        "Call this when the query is ambiguous, lacks scope, or could benefit from context. "
-        "Provide 2-5 focused questions that will help narrow down the research scope."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "questions": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "List of 2-5 clarifying questions to ask the user",
-                "minItems": 1,
-                "maxItems": 5,
-            },
-            "original_query": {
-                "type": "string",
-                "description": "The original research query being analyzed",
-            },
-        },
-        "required": ["questions", "original_query"],
-    },
-    fn=_ask_clarifying_questions,
-)
-
-
-# System prompt for the sampling-based query analyzer
-_ANALYZER_SYSTEM_PROMPT = """\
-You are a research query analyzer. Analyze the query and decide if clarification is needed.
-
-## Decision Criteria
-- If the query is SPECIFIC (clear scope, timeframe, focus area) → return it as-is
-- If the query is VAGUE (ambiguous terms, no scope, multiple interpretations) → use ask_clarifying_questions tool
-
-## Examples of VAGUE queries needing clarification:
-- "compare python frameworks" (Which frameworks? For what purpose?)
-- "research AI" (What aspect? Applications? Research papers? Companies?)
-- "best practices" (For what? What industry? What scale?)
-
-## Examples of SPECIFIC queries (no clarification needed):
-- "Compare FastAPI vs Django for building REST APIs in 2025"
-- "Research the environmental impact of electric vehicles vs gasoline cars"
-- "Analyze the top 5 JavaScript testing frameworks for React applications"
-
-When calling ask_clarifying_questions, ask 2-4 focused questions that will meaningfully improve research quality.
-"""
-
-
-async def _clarify_query_via_sampling(
-    query: str,
-    ctx: Context,
-) -> str:
-    """
-    Use ctx.sample() with tools to analyze and potentially clarify the query.
-
-    This is the SEP-1577 pattern: the LLM can call the ask_clarifying_questions
-    tool during sampling, which uses ctx.elicit() to interact with the user.
-    All of this happens in FOREGROUND before any background task spawns.
-
-    Args:
-        query: The research query to analyze
-        ctx: The MCP Context (must be available for this to work)
-
-    Returns:
-        The refined query (or original if no clarification needed/provided)
-    """
-    global _clarification_context
-
-    logger.info("🔍 Analyzing query via sampling (SEP-1577)...")
-
-    # Set context for the sampling tool
-    _clarification_context = ctx
-
-    try:
-        result = await ctx.sample(
-            messages=f"Analyze this research query and refine if needed:\n\n{query}",
-            system_prompt=_ANALYZER_SYSTEM_PROMPT,
-            tools=[_clarify_tool],
-            result_type=AnalyzedQuery,
-            max_tokens=1024,
-        )
-
-        analyzed = result.result
-        if analyzed.was_clarified:
-            logger.info("   ✨ Query clarified: %s", analyzed.summary[:80] if analyzed.summary else "")
-            logger.info("   📝 Refined: %s", analyzed.refined_query[:100])
-        else:
-            logger.info("   ✅ Query was specific enough (no clarification needed)")
-
-        return analyzed.refined_query
-
-    except Exception as e:
-        logger.warning("   ⚠️ Sampling-based clarification failed (%s), using original query", e)
-        return query
-
-    finally:
-        # Clear the context after use
-        _clarification_context = None
+    answer_1: str = Field(default="", description="Answer to first clarifying question")
+    answer_2: str = Field(default="", description="Answer to second clarifying question")
+    answer_3: str = Field(default="", description="Answer to third clarifying question")
 
 
 async def _maybe_clarify_query(
     query: str,
-    ctx: Context | None,
+    ctx: Context[Any, Any, Any] | None,
 ) -> str:
     """
-    Analyze query and optionally ask clarifying questions via ctx.sample().
+    Analyze query and optionally ask clarifying questions via ctx.elicit().
 
-    This implements SEP-1577 "Sampling with Tools" pattern:
-    - Uses ctx.sample() with internal tools in FOREGROUND
-    - LLM can call ask_clarifying_questions tool to elicit user input
-    - All clarification happens BEFORE background task spawns
-
-    Requires: chat.mcp.serverSampling enabled for gemini-research-mcp
+    Uses heuristics to detect vague queries and prompts for clarification.
 
     Args:
         query: The research query
@@ -441,21 +266,100 @@ async def _maybe_clarify_query(
 
     Returns the refined query, or original if clarification was skipped/unavailable.
     """
-    # Skip if no context (running in background task)
     if ctx is None:
-        logger.info("🔍 Skipping clarification (background task mode)")
+        logger.info("🔍 Skipping clarification (no context)")
         return query
 
-    # Use sampling-based clarification (SEP-1577 pattern)
-    return await _clarify_query_via_sampling(query, ctx)
+    # Simple heuristics for detecting vague queries
+    query_lower = query.lower()
+
+    is_vague = False
+    questions: list[str] = []
+
+    # Very short queries are often vague
+    if len(query) < 30:
+        is_vague = True
+        questions.append("Can you provide more context about what you're looking for?")
+
+    # Generic comparative terms
+    if any(term in query_lower for term in ["compare", "vs", "versus", "best", "top"]):
+        if not any(c.isdigit() for c in query):  # No numbers suggesting specificity
+            is_vague = True
+            questions.append("What specific aspects would you like to compare?")
+            questions.append("What's your use case or context?")
+
+    # Generic topic terms
+    if any(term in query_lower for term in ["research", "analyze", "investigate"]):
+        is_vague = True
+        questions.append("What specific angle or focus area interests you?")
+        questions.append("What's the timeframe or scope you're interested in?")
+
+    # "Best practices" without context
+    if "best practice" in query_lower:
+        is_vague = True
+        questions.append("What industry or domain are you in?")
+        questions.append("What's the scale or context (startup, enterprise, etc.)?")
+
+    if not is_vague or not questions:
+        logger.info("   ✅ Query is specific enough, no clarification needed")
+        return query
+
+    # Trim to 3 questions max
+    questions = questions[:3]
+    logger.info("   🎯 Query may need clarification: %d questions", len(questions))
+
+    try:
+        # Build dynamic schema with actual questions as descriptions
+        from pydantic import create_model
+
+        field_definitions = {
+            f"answer_{i+1}": (str, Field(default="", description=q))
+            for i, q in enumerate(questions)
+        }
+        DynamicSchema = create_model("ClarificationQuestions", **field_definitions)  # type: ignore
+
+        message = (
+            f"To improve research quality for:\n\n**\"{query}\"**\n\n"
+            f"Please answer these questions (optional - press 'Skip' to continue):"
+        )
+
+        result = await ctx.elicit(
+            message=message,
+            schema=DynamicSchema,
+        )
+
+        if result.action == "accept" and result.data:
+            data = result.data.model_dump() if hasattr(result.data, "model_dump") else {}
+            answers = [data.get(f"answer_{i + 1}", "") for i in range(len(questions))]
+            non_empty = [a for a in answers if a.strip()]
+
+            if non_empty:
+                logger.info("   ✨ User provided %d/%d answers", len(non_empty), len(questions))
+                clarification = "\n".join(
+                    f"Q: {q}\nA: {a}"
+                    for q, a in zip(questions, answers, strict=False)
+                    if a.strip()
+                )
+                refined = f"{query}\n\nAdditional context:\n{clarification}"
+                logger.info("   📝 Refined query: %s", refined[:100])
+                return refined
+            else:
+                logger.info("   ⏭️ User submitted but answers empty")
+        else:
+            logger.info("   ⏭️ User skipped/cancelled clarification")
+
+    except Exception as e:
+        logger.warning("   ⚠️ Elicitation failed: %s", e)
+
+    return query
 
 
 # =============================================================================
-# Deep Research Tool (with integrated clarification)
+# Deep Research Tool
 # =============================================================================
 
 
-@mcp.tool(task=TaskConfig(mode="optional"), annotations={"readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def research_deep(
     query: Annotated[str, "Research question or topic to investigate thoroughly"],
     format_instructions: Annotated[
@@ -466,8 +370,7 @@ async def research_deep(
         list[str] | None,
         "Optional: Gemini File Search store names to search your own data alongside web",
     ] = None,
-    progress: Progress = Progress(),  # noqa: B008
-    ctx: Context | None = Depends(OptionalContext),  # noqa: B008 - None in background tasks
+    ctx: Context[Any, Any, Any] | None = None,
 ) -> str:
     """
     Comprehensive autonomous research agent. Takes 3-20 minutes.
@@ -494,31 +397,21 @@ async def research_deep(
 
     start = time.time()
 
-    # Set progress total (100 = 100%)
-    await progress.set_total(100)
-
     # ==========================================================================
-    # Phase 1: Query Clarification (requires foreground Context)
+    # Phase 1: Query Clarification (if ctx available)
     # ==========================================================================
-    effective_query = query
+    effective_query = await _maybe_clarify_query(query, ctx)
 
-    try:
-        await progress.set_message("Analyzing query...")
-        effective_query = await _maybe_clarify_query(query, ctx)
-        if effective_query != query:
-            logger.info("   ✨ Using refined query: %s", effective_query[:100])
-    except Exception as e:
-        # Clarification unavailable (background mode) - proceed with original
-        logger.info("   ℹ️ Clarification skipped (%s), using original query", type(e).__name__)
+    if effective_query != query:
+        logger.info("   ✨ Using refined query")
 
     # ==========================================================================
     # Phase 2: Deep Research Execution
     # ==========================================================================
-    await progress.set_message("Starting deep research...")
+    if ctx is not None:
+        await ctx.info("Starting deep research...")
 
     try:
-        await progress.set_message("Initiating research agent...")
-
         thought_count = 0
         action_count = 0
         interaction_id: str | None = None
@@ -533,23 +426,26 @@ async def research_deep(
                 interaction_id = event.interaction_id
                 logger.info("   📋 interaction_id: %s", interaction_id)
 
-            # Track events for progress - show thought/action CONTENT
+            # Track events for progress
             if event.event_type == "thought":
                 thought_count += 1
-                # Display thought content (truncated to 55 chars) for transparency
                 content = event.content or ""
-                short_thought = content[:55] + "..." if len(content) > 55 else content
-                await progress.set_message(f"[{thought_count}] 🧠 {short_thought}")
-                # Progress: cap at 50% during thinking phase
-                await progress.increment(min(2, 50 - thought_count * 2))
+                short = content[:55] + "..." if len(content) > 55 else content
+                if ctx:
+                    await ctx.report_progress(
+                        progress=min(50, thought_count * 5),
+                        total=100,
+                        message=f"[{thought_count}] 🧠 {short}",
+                    )
             elif event.event_type == "action":
                 action_count += 1
-                # Display action content (e.g., search query) for transparency
                 content = event.content or ""
-                short_action = content[:55] + "..." if len(content) > 55 else content
-                await progress.set_message(f"[{action_count}] 🔍 {short_action}")
+                short = content[:55] + "..." if len(content) > 55 else content
+                if ctx:
+                    await ctx.info(f"[{action_count}] 🔍 {short}")
             elif event.event_type == "start":
-                await progress.set_message("🚀 Research agent autonomous investigation started")
+                if ctx:
+                    await ctx.info("🚀 Research agent autonomous investigation started")
             elif event.event_type == "error":
                 logger.error("   Stream error: %s", event.content)
 
@@ -557,7 +453,9 @@ async def research_deep(
             raise ValueError("No interaction_id received from stream")
 
         logger.info("   📊 Stream consumed: %d thoughts, %d actions", thought_count, action_count)
-        await progress.set_message("Waiting for research completion...")
+
+        if ctx:
+            await ctx.info("Waiting for research completion...")
 
         # Poll for completion
         max_wait = 1200  # 20 minutes max
@@ -575,7 +473,6 @@ async def research_deep(
 
             if raw_status == "completed":
                 logger.info("   ✅ Research completed in %s", _format_duration(elapsed))
-                await progress.set_message(f"✅ Research complete ({_format_duration(elapsed)})")
 
                 result = await process_citations(result, resolve_urls=True)
 
@@ -588,12 +485,15 @@ async def research_deep(
                     message=f"Research {raw_status} after {_format_duration(elapsed)}",
                 )
             else:
-                # Still working - update progress (cap at 90%)
-                progress_pct = min(90, int(50 + (elapsed / max_wait) * 40))
-                msg = f"⏳ Researching... ({_format_duration(elapsed)}, ~{progress_pct}%)"
-                await progress.set_message(msg)
+                # Still working - report progress
+                if ctx:
+                    progress_pct = min(90, int(50 + (elapsed / max_wait) * 40))
+                    await ctx.report_progress(
+                        progress=progress_pct,
+                        total=100,
+                        message=f"⏳ Researching... ({_format_duration(elapsed)})",
+                    )
 
-            # Wait before next poll
             await asyncio.sleep(poll_interval)
 
         # Timeout
@@ -617,7 +517,7 @@ async def research_deep(
         ) from e
 
 
-@mcp.tool(annotations={"readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def research_followup(
     previous_interaction_id: Annotated[
         str, "The interaction_id from a completed research_deep task"
@@ -673,7 +573,7 @@ async def research_followup(
 # =============================================================================
 
 
-@mcp.tool(annotations={"readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def start_research(
     query: Annotated[str, "Research question or complex topic requiring thorough investigation"],
     format_instructions: Annotated[
@@ -733,7 +633,7 @@ async def start_research(
         return f"❌ Failed to start research: {e}"
 
 
-@mcp.tool(annotations={"readOnlyHint": True})
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def check_research(
     interaction_id: Annotated[str, "The interaction_id from start_research"],
 ) -> str:
@@ -840,7 +740,7 @@ def get_research_models() -> str:
 
 def main() -> None:
     """Run the MCP server on stdio transport."""
-    logger.info("🚀 Starting Gemini Research MCP Server v%s (FastMCP)", __version__)
+    logger.info("🚀 Starting Gemini Research MCP Server v%s (MCP SDK)", __version__)
     logger.info("   Transport: stdio")
     logger.info("   Task mode: enabled (MCP Tasks / SEP-1732)")
 
