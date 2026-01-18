@@ -272,30 +272,41 @@ async def _maybe_clarify_query(
 
     # Simple heuristics for detecting vague queries
     query_lower = query.lower()
+    query_len = len(query)
 
     is_vague = False
     questions: list[str] = []
 
+    # Comprehensive queries (200+ chars with multiple sentences) skip clarification
+    # This catches detailed requests with format_instructions, multiple criteria, etc.
+    has_multiple_points = query.count("(") >= 2 or query.count(",") >= 3
+    is_comprehensive = query_len >= 200 and has_multiple_points
+
+    if is_comprehensive:
+        logger.info("   ✅ Query is comprehensive (%d chars), skipping clarification", query_len)
+        return query
+
     # Very short queries are often vague
-    if len(query) < 30:
+    if query_len < 30:
         is_vague = True
         questions.append("Can you provide more context about what you're looking for?")
 
-    # Generic comparative terms
+    # Generic comparative terms (only for short queries)
     if any(term in query_lower for term in ["compare", "vs", "versus", "best", "top"]):
-        if not any(c.isdigit() for c in query):  # No numbers suggesting specificity
+        if query_len < 100 and not any(c.isdigit() for c in query):
             is_vague = True
             questions.append("What specific aspects would you like to compare?")
             questions.append("What's your use case or context?")
 
-    # Generic topic terms
+    # Generic topic terms (only for short queries)
     if any(term in query_lower for term in ["research", "analyze", "investigate"]):
-        is_vague = True
-        questions.append("What specific angle or focus area interests you?")
-        questions.append("What's the timeframe or scope you're interested in?")
+        if query_len < 100:
+            is_vague = True
+            questions.append("What specific angle or focus area interests you?")
+            questions.append("What's the timeframe or scope you're interested in?")
 
-    # "Best practices" without context
-    if "best practice" in query_lower:
+    # "Best practices" without context (only for short queries)
+    if "best practice" in query_lower and query_len < 100:
         is_vague = True
         questions.append("What industry or domain are you in?")
         questions.append("What's the scale or context (startup, enterprise, etc.)?")
