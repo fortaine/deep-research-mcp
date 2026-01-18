@@ -12,8 +12,6 @@ The **reference MCP server** for AI-powered research using **Gemini**. Combines 
 | `research_deep` | Multi-step autonomous research | 3-20 min | Deep Research Agent (Interactions API) |
 | `research_followup` | Continue conversation after research | 5-30 sec | Interactions API |
 | `clarify_research` | Elicit preferences for vague queries | <5 sec | MCP Elicitation (SEP-1330) |
-| `start_research` | Start research async (non-blocking) | <1 sec | Deep Research Agent |
-| `check_research` | Check status or get results | <1 sec | Interactions API |
 
 ### Resources
 
@@ -23,7 +21,6 @@ The **reference MCP server** for AI-powered research using **Gemini**. Combines 
 
 ### Workflow
 
-**Synchronous (blocking):**
 ```
 research_web  ─── quick lookup ───▶  Got what you need?  ── yes ──▶ Done
        │                                        │
@@ -38,21 +35,9 @@ research_web  ─── quick lookup ───▶  Got what you need?  ── ye
                                         research_followup  ──▶  Dive deeper
 ```
 
-**Asynchronous (non-blocking):**
-```
-start_research  ──▶  Returns interaction_id immediately
-       │
-       ▼
-    (do other work)
-       │
-       ▼
-check_research  ──▶  Poll status / get results when ready
-```
-
 ### Advanced Features
 
 - **Elicitation (SEP-1330)**: `clarify_research` interactively refines vague queries before expensive research
-- **Async Pattern**: Non-blocking `start_research` + `check_research` for polling workflows
 - **MCP Tasks (SEP-1732)**: [Real-time progress](https://spec.modelcontextprotocol.io/specification/draft/server/tasks/) with streaming updates
 - **File Search**: Search your own data alongside web using `file_search_store_names`
 - **Follow-up**: Continue conversations with `previous_interaction_id`
@@ -180,12 +165,12 @@ async def research_deep(..., progress: Progress):
 
 ```
 src/gemini_research_mcp/
-├── __init__.py     # Package exports (ErrorCategory, start_research_async, etc.)
-├── server.py       # MCP server (5 tools + 1 resource)
+├── __init__.py     # Package exports (ErrorCategory, DeepResearchResult, etc.)
+├── server.py       # MCP server (4 tools + 1 resource)
 ├── config.py       # Configuration management
 ├── types.py        # Data types, exceptions, ErrorCategory enum
 ├── quick.py        # research_web (grounded search)
-├── deep.py         # research_deep + start_research_async + get_research_status
+├── deep.py         # research_deep + research_followup
 ├── citations.py    # Citation extraction and URL resolution
 └── py.typed        # PEP 561 type marker
 ```

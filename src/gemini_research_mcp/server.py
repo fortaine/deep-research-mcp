@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 from gemini_research_mcp import __version__
 from gemini_research_mcp.citations import process_citations
 from gemini_research_mcp.config import LOGGER_NAME, get_deep_research_agent, get_model
-from gemini_research_mcp.deep import deep_research_stream, get_research_status, start_research_async
+from gemini_research_mcp.deep import deep_research_stream, get_research_status
 from gemini_research_mcp.deep import research_followup as _research_followup
 from gemini_research_mcp.quick import quick_research
 from gemini_research_mcp.types import DeepResearchError, DeepResearchResult
@@ -580,121 +580,6 @@ async def research_followup(
 
 
 # =============================================================================
-# Async Research Tools (Non-blocking pattern)
-# =============================================================================
-
-
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def start_research(
-    query: Annotated[str, "Research question or complex topic requiring thorough investigation"],
-    format_instructions: Annotated[
-        str | None,
-        (
-            "Optional formatting instructions for the report output "
-            "(e.g., 'Format as executive briefing', 'Include comparison table')"
-        ),
-    ] = None,
-    file_search_store_names: Annotated[
-        list[str] | None,
-        (
-            "Optional: Search your own data alongside web search. "
-            "List of Gemini File Search store names (e.g., ['fileSearchStores/my-store'])."
-        ),
-    ] = None,
-) -> str:
-    """
-    Start deep research WITHOUT waiting. Returns immediately with interaction_id.
-
-    Use when: You want to kick off research and do other work while it runs.
-    Research typically takes 3-20 minutes.
-
-    **Workflow:**
-    1. Call start_research() → get interaction_id
-    2. Do other work or wait a few minutes
-    3. Call check_research() with the interaction_id to get results
-
-    For blocking research with progress updates, use research_deep instead.
-
-    Args:
-        query: Research question or complex topic
-        format_instructions: Optional formatting instructions for the report output
-        file_search_store_names: Optional file search store names for RAG
-
-    Returns:
-        interaction_id to use with check_research()
-    """
-    logger.info("🚀 start_research (async): %s", query[:100])
-
-    try:
-        interaction_id = await start_research_async(
-            query=query,
-            format_instructions=format_instructions,
-            file_search_store_names=file_search_store_names,
-        )
-
-        return (
-            f"✅ Research started!\n\n"
-            f"**Interaction ID:** `{interaction_id}`\n\n"
-            f"Research typically takes 3-20 minutes. "
-            f"Use `check_research` with this ID to get results."
-        )
-
-    except Exception as e:
-        logger.exception("start_research failed: %s", e)
-        return f"❌ Failed to start research: {e}"
-
-
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def check_research(
-    interaction_id: Annotated[str, "The interaction_id from start_research"],
-) -> str:
-    """
-    Check status or get results of a research task started with start_research.
-
-    Returns status ("in_progress", "completed", "failed") and the full report if complete.
-
-    Args:
-        interaction_id: The interaction_id from start_research()
-
-    Returns:
-        Status and results (if completed)
-    """
-    logger.info("🔍 check_research: %s", interaction_id)
-
-    try:
-        result = await get_research_status(interaction_id)
-
-        raw_status = "unknown"
-        if result.raw_interaction:
-            raw_status = getattr(result.raw_interaction, "status", "unknown")
-
-        if raw_status == "completed":
-            result = await process_citations(result, resolve_urls=True)
-            duration = result.duration_seconds or 0
-            report = _format_deep_research_report(result, interaction_id, duration)
-            return f"## ✅ Research Complete\n\n{report}"
-
-        elif raw_status == "failed":
-            error = getattr(result.raw_interaction, "error", "Unknown error")
-            return f"## ❌ Research Failed\n\nError: {error}\n\nInteraction ID: `{interaction_id}`"
-
-        elif raw_status == "cancelled":
-            return f"## ⚠️ Research Cancelled\n\nInteraction ID: `{interaction_id}`"
-
-        else:
-            return (
-                f"## ⏳ Research In Progress\n\n"
-                f"Status: `{raw_status}`\n\n"
-                f"Research is still running. Check again in a few minutes.\n\n"
-                f"Interaction ID: `{interaction_id}`"
-            )
-
-    except Exception as e:
-        logger.exception("check_research failed: %s", e)
-        return f"❌ Failed to check research: {e}"
-
-
-# =============================================================================
 # Resources
 # =============================================================================
 
@@ -721,7 +606,7 @@ def get_research_models() -> str:
 - **Best for:** Fact-checking, current events, quick lookups, documentation
 - **Features:** Real-time web search, thinking summaries
 
-## Deep Research (research_deep, start_research)
+## Deep Research (research_deep)
 
 **Agent:** `{deep_agent}`
 - **Latency:** 3-20 minutes (can take up to 60 min for complex topics)
