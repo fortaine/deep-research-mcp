@@ -34,7 +34,8 @@ classifiers = [
 ]
 dependencies = [
     "google-genai>=1.59.0",
-    "mcp>=1.25.0",
+    # MCP upgraded from 1.10.0 to 1.25.0; restrict to 1.x to avoid unexpected breaking changes.
+    "mcp>=1.25.0,<2.0.0",
     "httpx>=0.28.1",
     "python-dotenv>=1.0.0",
 ]
