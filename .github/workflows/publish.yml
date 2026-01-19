@@ -32,7 +32,7 @@ jobs:
         run: uv run pytest -v --tb=short
 
       - name: Run linter
-        run: uv run ruff check .
+        run: uv run ruff check src/
 
       - name: Run type checker
         run: uv run mypy src/
