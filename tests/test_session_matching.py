@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from gemini_research_mcp.storage import ResearchSession
-
 
 # =============================================================================
 # Fixtures
@@ -82,7 +80,7 @@ class TestResearchFollowupSessionMatching:
         ):
             mock_followup.return_value = "Follow-up response about quantum computing."
 
-            result = await research_followup(
+            await research_followup(
                 query="Tell me more about qubits",
                 interaction_id="explicit-session-id",
             )
@@ -122,7 +120,7 @@ class TestResearchFollowupSessionMatching:
                 return_value="Details about superconducting qubits...",
             ) as mock_followup,
         ):
-            result = await research_followup(
+            await research_followup(
                 query="Explain more about superconducting qubits",
             )
 
