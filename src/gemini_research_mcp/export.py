@@ -330,6 +330,9 @@ def export_to_docx(
 
     Requires pypandoc package with Pandoc binary.
     Install with: pip install 'gemini-research-mcp[docx]'
+
+    On Apple Silicon (ARM64), you may need to install Pandoc separately:
+        brew install pandoc
     """
     try:
         import pypandoc  # type: ignore[import-untyped]
@@ -370,6 +373,20 @@ def export_to_docx(
 
         # Read the generated DOCX
         content = Path(tmp_path).read_bytes()
+    except OSError as e:
+        # Handle Pandoc not found or architecture mismatch (ARM64)
+        error_msg = str(e)
+        if "Bad CPU type" in error_msg or "No pandoc was found" in error_msg:
+            raise OSError(
+                "Pandoc binary not available. The bundled pypandoc_binary may not "
+                "support your platform (e.g., Apple Silicon/ARM64).\n\n"
+                "Solution: Install Pandoc separately:\n"
+                "  - macOS (Homebrew): brew install pandoc\n"
+                "  - Ubuntu/Debian:    sudo apt-get install pandoc\n"
+                "  - Windows:          choco install pandoc\n"
+                "  - Or download from: https://pandoc.org/installing.html"
+            ) from e
+        raise
     finally:
         # Clean up temp file
         Path(tmp_path).unlink(missing_ok=True)

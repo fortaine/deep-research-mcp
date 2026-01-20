@@ -106,6 +106,31 @@ uv run gemini-research-mcp
 uvx gemini-research-mcp
 ```
 
+## DOCX Export (Optional)
+
+Export research sessions to professional Word documents with Table of Contents.
+
+```bash
+# Install with DOCX support
+pip install 'gemini-research-mcp[docx]'
+# or
+uv add 'gemini-research-mcp[docx]'
+```
+
+### Apple Silicon (ARM64) Users
+
+The bundled Pandoc binary doesn't support ARM64. Install Pandoc separately:
+
+```bash
+brew install pandoc
+```
+
+Then install without the binary bundle:
+
+```bash
+pip install gemini-research-mcp pypandoc
+```
+
 ## Development
 
 ```bash
