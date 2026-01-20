@@ -16,6 +16,7 @@ Architecture:
 # as it breaks type resolution for Annotated parameters in tool functions
 
 import asyncio
+import json
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -32,7 +33,7 @@ from gemini_research_mcp.citations import process_citations
 from gemini_research_mcp.config import LOGGER_NAME, get_deep_research_agent, get_model
 from gemini_research_mcp.deep import deep_research_stream, get_research_status
 from gemini_research_mcp.deep import research_followup as _research_followup
-from gemini_research_mcp.quick import generate_summary, quick_research
+from gemini_research_mcp.quick import generate_summary, quick_research, semantic_match_session
 from gemini_research_mcp.storage import (
     list_research_sessions,
     save_research_session,
@@ -95,21 +96,24 @@ Use for: research reports, competitive analysis, "compare", "analyze", "investig
 - Automatically asks clarifying questions for vague queries
 - Runs as background task with progress updates
 - Returns comprehensive report with citations
-- Sessions are saved for later follow-up
+- Sessions are saved with AI-generated summaries for later follow-up
 
 ## Follow-up (research_followup)
 Continue conversation with any previous deep research session.
 Use for: "elaborate", "clarify", "summarize", follow-up questions.
-Sessions last 55 days (paid tier).
+- Automatically finds the matching session based on your question
+- No need to track interaction_ids manually
+- Sessions last 55 days (paid tier)
 
 ## List Sessions (list_research_sessions_tool)
-Find previous research sessions by query and summary.
-Use to discover old research before using research_followup.
+Returns JSON list of previous research sessions with queries and summaries.
+Use to answer "what research did I do about X?" questions.
 
 **Workflow:**
 - Simple questions → research_web
 - Complex questions → research_deep
-- Continue old research → list_research_sessions_tool → research_followup
+- "What did I research about X?" → list_research_sessions_tool
+- Continue old research → research_followup (auto-matches session)
 """,
     lifespan=lifespan,
 )
@@ -568,12 +572,13 @@ async def research_deep(
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def research_followup(
-    previous_interaction_id: Annotated[
-        str, "The interaction_id from a completed research_deep task"
-    ],
     query: Annotated[
-        str, "Follow-up question about the research (e.g., 'elaborate on the second point')"
+        str, "Follow-up question about previous research (e.g., 'elaborate on surface codes')"
     ],
+    interaction_id: Annotated[
+        str | None,
+        "Optional: specific interaction_id. If not provided, auto-matches from sessions.",
+    ] = None,
     model: Annotated[
         str, "Model to use for follow-up. Default: gemini-3-pro-preview"
     ] = "gemini-3-pro-preview",
@@ -581,20 +586,62 @@ async def research_followup(
     """
     Continue conversation after deep research. Ask follow-up questions without restarting.
 
+    The tool automatically finds the relevant research session based on your question.
+    You can optionally provide an interaction_id for direct reference.
+
     Use for: "clarify", "elaborate", "summarize", "explain more", "what about",
     continue discussion, ask more questions about completed research results.
 
     Args:
-        previous_interaction_id: The interaction_id from research_deep
         query: Your follow-up question
+        interaction_id: Optional specific session ID (from list_research_sessions)
         model: Model to use (default: gemini-3-pro-preview)
 
     Returns:
         Response to the follow-up question
     """
-    logger.info("💬 research_followup: %s -> %s", previous_interaction_id, query[:100])
+    logger.info("💬 research_followup: query=%s, id=%s", query[:100], interaction_id)
 
     try:
+        # If no interaction_id provided, find the best matching session
+        previous_interaction_id = interaction_id
+        if not previous_interaction_id:
+            sessions = list_research_sessions(limit=20, include_expired=False)
+            if not sessions:
+                return "❌ No research sessions found. Complete a deep research first."
+
+            # Build session list for semantic matching
+            session_dicts = [
+                {
+                    "id": s.interaction_id,
+                    "query": s.query,
+                    "summary": s.summary or s.query[:100],
+                }
+                for s in sessions
+            ]
+
+            matched_id = await semantic_match_session(query, session_dicts)
+            if not matched_id:
+                return (
+                    "❌ Could not find a matching research session for your question.\n\n"
+                    "Try:\n"
+                    "- Use `list_research_sessions` to see available sessions\n"
+                    "- Provide a specific `interaction_id`\n"
+                    "- Rephrase your question to match a previous research topic"
+                )
+
+            previous_interaction_id = matched_id
+            # Find the matched session for logging
+            matched_session = next(
+                (s for s in sessions if s.interaction_id == matched_id), None
+            )
+            if matched_session:
+                logger.info(
+                    "   📎 Matched to session: %s (%s)",
+                    matched_id[:12],
+                    matched_session.query[:50],
+                )
+
         response = await _research_followup(
             previous_interaction_id=previous_interaction_id,
             query=query,
@@ -626,54 +673,48 @@ async def list_research_sessions_tool(
     List saved research sessions available for follow-up.
 
     Sessions are automatically saved when deep research completes successfully.
-    Each session shows a summary of findings for easy discovery.
-    Use research_followup with the interaction ID to continue a conversation.
+    Returns JSON for easy parsing by agents.
+
+    Note: You don't need to extract interaction_ids manually.
+    Just use research_followup with your question - it will automatically
+    find the matching session.
 
     Returns:
-        List of research sessions with summaries and interaction IDs
+        JSON array of research sessions with summaries
     """
     logger.info("📋 list_research_sessions: limit=%d, include_expired=%s", limit, include_expired)
 
     sessions = list_research_sessions(limit=limit, include_expired=include_expired)
 
     if not sessions:
-        return "No research sessions found. Complete a deep research to save a session."
+        return json.dumps({"sessions": [], "message": "No research sessions found."})
 
-    lines = [f"## Research Sessions ({len(sessions)} found)", ""]
-
+    session_list = []
     for session in sessions:
-        title = session.title or session.query[:60]
-        if len(session.query) > 60 and not session.title:
-            title += "..."
-
-        lines.extend([
-            f"### {title}",
-            f"- **ID:** `{session.interaction_id}`",
-            f"- **Query:** {session.query[:100]}{'...' if len(session.query) > 100 else ''}",
-            f"- **Created:** {session.created_at_iso}",
-            f"- **Expires in:** {session.time_remaining_human}",
-        ])
-
-        # Show summary for easy discovery
-        if session.summary:
-            lines.extend([
-                "",
-                f"> {session.summary}",
-            ])
-
+        session_data: dict[str, str | int | float | None] = {
+            "interaction_id": session.interaction_id,
+            "query": session.query,
+            "summary": session.summary,
+            "created_at": session.created_at_iso,
+            "expires_in": session.time_remaining_human,
+        }
+        if session.title:
+            session_data["title"] = session.title
         if session.duration_seconds:
-            lines.append(f"- **Duration:** {_format_duration(session.duration_seconds)}")
+            session_data["duration_seconds"] = session.duration_seconds
         if session.total_tokens:
-            lines.append(f"- **Tokens:** {session.total_tokens:,}")
+            session_data["total_tokens"] = session.total_tokens
 
-        lines.append("")
+        session_list.append(session_data)
 
-    lines.extend([
-        "---",
-        "*Use `research_followup` with the interaction ID to continue a conversation.*",
-    ])
-
-    return "\n".join(lines)
+    return json.dumps(
+        {
+            "sessions": session_list,
+            "count": len(session_list),
+            "hint": "Use research_followup with your question - auto-matches session.",
+        },
+        indent=2,
+    )
 
 
 # =============================================================================

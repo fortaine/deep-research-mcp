@@ -203,3 +203,84 @@ Summary:"""
     except Exception as e:
         logger.warning("Summary generation failed: %s", e)
         return ""
+
+
+async def semantic_match_session(
+    user_query: str,
+    sessions: list[dict[str, str]],
+) -> str | None:
+    """
+    Find the research session that best matches a user's follow-up question.
+
+    Uses Gemini 3.0 Flash with minimal thinking for fast semantic matching.
+    Cost: ~$0.0003 per call.
+
+    Args:
+        user_query: The user's follow-up question
+        sessions: List of dicts with 'id', 'query', and 'summary' keys
+
+    Returns:
+        The interaction_id of the best matching session, or None if no match
+    """
+    if not sessions:
+        return None
+
+    if len(sessions) == 1:
+        # Only one session - return it directly
+        return sessions[0]["id"]
+
+    client = genai.Client(api_key=get_api_key())
+    model = get_summary_model()
+
+    # Build session list for prompt
+    session_list = []
+    for i, s in enumerate(sessions, 1):
+        session_list.append(
+            f"{i}. [{s['id']}] \"{s['query']}\"\n   Summary: {s.get('summary', 'No summary')}"
+        )
+
+    prompt = f"""Given these research sessions and a user's follow-up question,
+which session is the user most likely referring to?
+
+Research Sessions:
+{chr(10).join(session_list)}
+
+User's follow-up question: "{user_query}"
+
+Return ONLY the interaction_id (the value in brackets) of the best matching session.
+If none of the sessions match the user's question, return exactly: NONE"""
+
+    config = GenerateContentConfig(
+        thinking_config=ThinkingConfig(
+            thinking_level=ThinkingLevel.MINIMAL,
+        ),
+    )
+
+    try:
+        response = await client.aio.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=config,
+        )
+        result = (response.text or "").strip()
+
+        # Handle no match
+        if result.upper() == "NONE":
+            return None
+
+        # Validate the returned ID exists in our sessions
+        valid_ids = {s["id"] for s in sessions}
+        if result in valid_ids:
+            return result
+
+        # Try to extract ID if model added extra text
+        for session_id in valid_ids:
+            if session_id in result:
+                return session_id
+
+        logger.warning("semantic_match_session: invalid response '%s'", result)
+        return None
+
+    except Exception as e:
+        logger.warning("semantic_match_session failed: %s", e)
+        return None
