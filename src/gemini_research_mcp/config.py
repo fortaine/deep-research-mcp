@@ -43,7 +43,18 @@ STREAM_POLL_INTERVAL = 10.0  # seconds between polls
 MAX_POLL_TIME = 3600.0  # 60 minutes max wait
 DEFAULT_TIMEOUT = 3600.0  # 60 minutes default timeout
 RECONNECT_DELAY = 2.0  # Initial delay before reconnection
-MAX_INITIAL_RETRIES = 3  # Retries for initial stream creation
+MAX_INITIAL_RETRIES = 5  # Retries for initial stream creation (increased for reliability)
+MAX_INITIAL_RETRY_DELAY = 30.0  # Maximum delay between initial retries
+INITIAL_RETRY_BACKOFF = 1.5  # Exponential backoff multiplier for initial retries
+
+# Reconnection configuration for stream interruptions
+MAX_STREAM_RETRIES = 10  # Maximum reconnection attempts after stream established
+MAX_STREAM_RETRY_DELAY = 60.0  # Maximum delay between stream reconnection attempts
+STREAM_RETRY_BACKOFF = 1.5  # Exponential backoff multiplier for stream retries
+
+# Client health monitoring (for long-running servers)
+CLIENT_MAX_AGE_SECONDS = 3600.0  # Recreate client after 1 hour of inactivity
+CLIENT_MAX_REQUESTS = 100  # Recreate client after N requests (0 = disabled)
 
 # Errors that should trigger reconnection
 RETRYABLE_ERRORS = [
