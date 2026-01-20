@@ -55,7 +55,8 @@ MAX_STREAM_RETRY_DELAY = 60.0  # Maximum delay between stream reconnection attem
 STREAM_RETRY_BACKOFF = 1.5  # Exponential backoff multiplier for stream retries
 
 # Client health monitoring (for long-running servers)
-CLIENT_MAX_AGE_SECONDS = 3600.0  # Recreate client after 1 hour of inactivity
+# Refresh triggers: age > max, requests >= max, failures >= 3, or idle > max/2
+CLIENT_MAX_AGE_SECONDS = 3600.0  # Max client age (1 hour); also refreshes if idle > 30min
 CLIENT_MAX_REQUESTS = 100  # Recreate client after N requests (0 = disabled)
 
 # Errors that should trigger reconnection

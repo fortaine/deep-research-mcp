@@ -53,10 +53,21 @@ SESSIONS_COLLECTION = "sessions"
 
 
 def get_storage_dir() -> Path:
-    """Get storage directory from env or XDG-compliant default."""
+    """Get storage directory from env or XDG-compliant default.
+
+    If GEMINI_RESEARCH_STORAGE_PATH is set:
+    - If it's a directory path (exists or ends with /), use it directly
+    - Otherwise, treat it as a file path and use its parent
+    """
     custom_path = os.environ.get("GEMINI_RESEARCH_STORAGE_PATH")
     if custom_path:
-        return Path(custom_path).parent
+        # Expand ~ and resolve path
+        expanded = Path(custom_path).expanduser().resolve()
+        # If path exists and is a directory, or ends with /, use it directly
+        if expanded.is_dir() or custom_path.endswith(os.sep) or custom_path.endswith("/"):
+            return expanded
+        # Otherwise treat as file path and use parent
+        return expanded.parent
     return Path(platformdirs.user_data_dir(APP_NAME))
 
 
@@ -150,8 +161,19 @@ class ResearchSession:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ResearchSession:
-        """Create from dictionary."""
-        # Handle missing fields gracefully
+        """Create from dictionary.
+
+        Handles missing optional fields gracefully.
+
+        Raises:
+            KeyError: If required fields (interaction_id, query, created_at) are missing.
+        """
+        # Validate required fields explicitly for better error messages
+        required = ["interaction_id", "query", "created_at"]
+        missing = [k for k in required if k not in data]
+        if missing:
+            raise KeyError(f"Missing required fields: {', '.join(missing)}")
+
         return cls(
             interaction_id=data["interaction_id"],
             query=data["query"],
@@ -291,7 +313,8 @@ class SessionStorage:
         # Sort by created_at, newest first
         sessions.sort(key=lambda s: s.created_at, reverse=True)
 
-        if limit:
+        # Apply limit if positive
+        if limit is not None and limit > 0:
             sessions = sessions[:limit]
 
         return sessions

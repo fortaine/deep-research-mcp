@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from pathlib import Path
-from typing import Generator
 
 import pytest
 
@@ -15,7 +13,6 @@ from gemini_research_mcp.storage import (
     SessionStorage,
     get_storage_dir,
     get_ttl_seconds,
-    save_research_session,
 )
 
 

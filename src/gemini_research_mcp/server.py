@@ -33,8 +33,10 @@ from gemini_research_mcp.citations import process_citations
 from gemini_research_mcp.config import LOGGER_NAME, get_deep_research_agent, get_model
 from gemini_research_mcp.deep import deep_research_stream, get_research_status
 from gemini_research_mcp.deep import research_followup as _research_followup
+from gemini_research_mcp.export import ExportFormat, export_session
 from gemini_research_mcp.quick import generate_summary, quick_research, semantic_match_session
 from gemini_research_mcp.storage import (
+    get_research_session,
     list_research_sessions,
     save_research_session,
 )
@@ -109,11 +111,16 @@ Use for: "elaborate", "clarify", "summarize", follow-up questions.
 Returns JSON list of previous research sessions with queries and summaries.
 Use to answer "what research did I do about X?" questions.
 
+## Export (export_research_session)
+Export completed research to Markdown, JSON, or Word (DOCX) format.
+Use for: sharing reports, archiving research, creating deliverables.
+
 **Workflow:**
 - Simple questions → research_web
 - Complex questions → research_deep
 - "What did I research about X?" → list_research_sessions_tool
 - Continue old research → research_followup (auto-matches session)
+- Export for sharing → export_research_session
 """,
     lifespan=lifespan,
 )
@@ -518,16 +525,23 @@ async def research_deep(
                         max_chars=300,
                     )
 
-                save_research_session(
-                    interaction_id=interaction_id,
-                    query=effective_query,
-                    summary=summary,
-                    report_text=result.text,
-                    format_instructions=format_instructions,
-                    agent_name=get_deep_research_agent(),
-                    duration_seconds=elapsed,
-                    total_tokens=total_tokens,
-                )
+                # Save session for later follow-up (guard against filesystem errors)
+                try:
+                    save_research_session(
+                        interaction_id=interaction_id,
+                        query=effective_query,
+                        summary=summary,
+                        report_text=result.text,
+                        format_instructions=format_instructions,
+                        agent_name=get_deep_research_agent(),
+                        duration_seconds=elapsed,
+                        total_tokens=total_tokens,
+                    )
+                except Exception as save_error:
+                    logger.warning(
+                        "⚠️ Failed to save session (research succeeded): %s",
+                        save_error,
+                    )
 
                 return _format_deep_research_report(result, interaction_id, elapsed)
 
@@ -715,6 +729,125 @@ async def list_research_sessions_tool(
         },
         indent=2,
     )
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+async def export_research_session(
+    interaction_id: Annotated[
+        str | None,
+        "Interaction ID of the session to export. If not provided, exports the most recent.",
+    ] = None,
+    format: Annotated[
+        str,
+        "Export format: 'markdown' (.md), 'json' (.json), or 'docx' (Word document)",
+    ] = "markdown",
+    query: Annotated[
+        str | None,
+        "Optional: search for a session by query text instead of interaction_id",
+    ] = None,
+) -> str:
+    """
+    Export a research session to Markdown, JSON, or Word (DOCX) format.
+
+    Similar to Google's Deep Research export feature, this creates professional
+    documents suitable for sharing, archiving, or further editing.
+
+    Supported formats:
+    - **markdown**: Clean, readable .md file with full report and citations
+    - **json**: Machine-readable with all metadata (for programmatic use)
+    - **docx**: Professional Word document with proper formatting, headings, lists
+
+    Args:
+        interaction_id: Specific session ID to export (from list_research_sessions)
+        format: Output format - markdown, json, or docx
+        query: Search for session by query text (alternative to interaction_id)
+
+    Returns:
+        JSON with export details (filename, size, base64 content for docx)
+    """
+    import base64
+
+    logger.info(
+        "📤 export_research_session: id=%s, format=%s, query=%s",
+        interaction_id,
+        format,
+        query[:30] if query else None,
+    )
+
+    try:
+        session = None
+
+        # Find session by interaction_id
+        if interaction_id:
+            session = get_research_session(interaction_id)
+            if not session:
+                return json.dumps({
+                    "error": f"Session not found: {interaction_id}",
+                    "hint": "Use list_research_sessions to see available sessions.",
+                })
+
+        # Find session by query search
+        elif query:
+            sessions = list_research_sessions(limit=20)
+            for s in sessions:
+                query_match = query.lower() in s.query.lower()
+                title_match = s.title and query.lower() in s.title.lower()
+                if query_match or title_match:
+                    session = s
+                    break
+            if not session:
+                return json.dumps({
+                    "error": f"No session found matching query: {query}",
+                    "hint": "Use list_research_sessions to see available sessions.",
+                })
+
+        # Default to most recent session
+        else:
+            sessions = list_research_sessions(limit=1)
+            if not sessions:
+                return json.dumps({
+                    "error": "No research sessions found.",
+                    "hint": "Complete a deep research first with research_deep.",
+                })
+            session = sessions[0]
+
+        # Export
+        result = export_session(session, format)
+
+        response: dict[str, Any] = {
+            "success": True,
+            "format": result.format.value,
+            "filename": result.filename,
+            "size": result.size_human,
+            "mime_type": result.mime_type,
+            "session": {
+                "interaction_id": session.interaction_id,
+                "query": session.query[:100],
+                "title": session.title,
+            },
+        }
+
+        # For text formats, include content directly
+        if result.format in (ExportFormat.MARKDOWN, ExportFormat.JSON):
+            response["content"] = result.content.decode("utf-8")
+        else:
+            # For binary formats (DOCX), include base64
+            response["content_base64"] = base64.b64encode(result.content).decode("ascii")
+            response["hint"] = (
+                "Decode content_base64 and save as .docx file, "
+                "or use this in automation workflows."
+            )
+
+        return json.dumps(response, indent=2)
+
+    except ImportError as e:
+        return json.dumps({
+            "error": str(e),
+            "hint": "Install python-docx for DOCX export: pip install python-docx",
+        })
+    except Exception as e:
+        logger.exception("export_research_session failed: %s", e)
+        return json.dumps({"error": f"Export failed: {e}"})
 
 
 # =============================================================================
