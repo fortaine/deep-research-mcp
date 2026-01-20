@@ -32,7 +32,7 @@ from gemini_research_mcp.citations import process_citations
 from gemini_research_mcp.config import LOGGER_NAME, get_deep_research_agent, get_model
 from gemini_research_mcp.deep import deep_research_stream, get_research_status
 from gemini_research_mcp.deep import research_followup as _research_followup
-from gemini_research_mcp.quick import quick_research
+from gemini_research_mcp.quick import generate_summary, quick_research
 from gemini_research_mcp.storage import (
     list_research_sessions,
     save_research_session,
@@ -507,11 +507,12 @@ async def research_deep(
                 # Generate summary (first 300 chars of report or query)
                 summary = None
                 if result.text:
-                    # Take first paragraph or first 300 chars
-                    first_para = result.text.split("\n\n")[0]
-                    summary = first_para[:300]
-                    if len(first_para) > 300:
-                        summary += "..."
+                    # Use AI to generate concise summary (~$0.0003/call)
+                    summary = await generate_summary(
+                        text=result.text,
+                        query=effective_query,
+                        max_chars=300,
+                    )
 
                 save_research_session(
                     interaction_id=interaction_id,

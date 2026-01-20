@@ -24,6 +24,8 @@ LOGGER_NAME = "gemini-research-mcp"
 DEFAULT_MODEL = "gemini-3-flash-preview"
 # Interactions Deep Research agent name (preview; override via DEEP_RESEARCH_AGENT if needed)
 DEFAULT_DEEP_RESEARCH_AGENT = "deep-research-pro-preview-12-2025"
+# Model for generating summaries (fast, cheap)
+DEFAULT_SUMMARY_MODEL = "gemini-3.0-flash"
 
 # Thinking level for Gemini 3 models
 # Values: "minimal", "low", "medium", "high"
@@ -90,6 +92,11 @@ def get_model() -> str:
 def get_deep_research_agent() -> str:
     """Get Deep Research agent name with env override support."""
     return os.environ.get("DEEP_RESEARCH_AGENT", DEFAULT_DEEP_RESEARCH_AGENT)
+
+
+def get_summary_model() -> str:
+    """Get model for generating summaries (fast, cheap)."""
+    return os.environ.get("GEMINI_SUMMARY_MODEL", DEFAULT_SUMMARY_MODEL)
 
 
 def is_retryable_error(error_msg: str) -> bool:

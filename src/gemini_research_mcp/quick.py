@@ -24,6 +24,7 @@ from gemini_research_mcp.config import (
     default_system_prompt,
     get_api_key,
     get_model,
+    get_summary_model,
 )
 from gemini_research_mcp.types import ResearchResult, Source
 
@@ -139,3 +140,66 @@ async def quick_research(
         queries=queries,
         thinking_summary=thinking_summary,
     )
+
+
+async def generate_summary(
+    text: str,
+    query: str,
+    *,
+    max_chars: int = 300,
+) -> str:
+    """
+    Generate a concise summary of research results using Gemini 3.0 Flash.
+
+    Uses minimal thinking level for fastest, cheapest summarization.
+    Cost: ~$0.0003 per summary (~100 output tokens).
+
+    Args:
+        text: The full research report text to summarize
+        query: The original research query (for context)
+        max_chars: Maximum characters for summary (default 300)
+
+    Returns:
+        A concise summary string
+    """
+    if not text:
+        return ""
+
+    client = genai.Client(api_key=get_api_key())
+    model = get_summary_model()
+
+    # Truncate input to first ~2000 chars to minimize tokens
+    input_text = text[:2000]
+    if len(text) > 2000:
+        input_text += "..."
+
+    prompt = f"""Summarize this research report in 2-3 sentences (max {max_chars} characters).
+Focus on the key findings and main conclusions.
+
+Original query: {query}
+
+Report:
+{input_text}
+
+Summary:"""
+
+    config = GenerateContentConfig(
+        thinking_config=ThinkingConfig(
+            thinking_level=ThinkingLevel.MINIMAL,
+        ),
+    )
+
+    try:
+        response = await client.aio.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=config,
+        )
+        summary = (response.text or "").strip()
+        # Ensure we stay within limit
+        if len(summary) > max_chars:
+            summary = summary[: max_chars - 3] + "..."
+        return summary
+    except Exception as e:
+        logger.warning("Summary generation failed: %s", e)
+        return ""
