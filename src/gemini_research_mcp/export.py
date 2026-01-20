@@ -761,7 +761,7 @@ def _render_gfm_table(document: Any, table_element: Any) -> None:
         document: The python-docx Document object
         table_element: The GFM Table element from marko parser
     """
-    from docx.shared import Inches, Pt, RGBColor
+    from docx.shared import Pt, RGBColor
 
     # Extract rows from the table element
     rows_data: list[list[str]] = []
@@ -814,7 +814,7 @@ def _render_gfm_table(document: Any, table_element: Any) -> None:
     table.style = "Table Grid"
 
     # Professional colors
-    HEADER_BG = RGBColor(0xE7, 0xEF, 0xF8)  # Light blue background
+    HEADER_BG = "E7EFF8"  # Light blue background
     NAVY_BLUE = RGBColor(0x1F, 0x49, 0x7D)
 
     # Fill the table
@@ -841,7 +841,7 @@ def _render_gfm_table(document: Any, table_element: Any) -> None:
                 from docx.oxml.ns import qn
                 cell_props = cell._tc.get_or_add_tcPr()
                 shading = OxmlElement("w:shd")
-                shading.set(qn("w:fill"), "E7EFF8")
+                shading.set(qn("w:fill"), HEADER_BG)
                 cell_props.append(shading)
 
     # Add some space after the table
