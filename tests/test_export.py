@@ -18,7 +18,6 @@ from gemini_research_mcp.export import (
 )
 from gemini_research_mcp.storage import ResearchSession
 
-
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -227,8 +226,9 @@ class TestDocxExport:
         """Test that DOCX output is a valid ZIP archive (OOXML format)."""
         pytest.importorskip("skelmis.docx")
 
-        from zipfile import ZipFile
         from io import BytesIO
+        from zipfile import ZipFile
+
         from gemini_research_mcp.export import export_to_docx
 
         result = export_to_docx(sample_session)
@@ -380,3 +380,149 @@ class TestExportResult:
             mime_type="text/markdown",
         )
         assert "KB" in result.size_human
+
+
+# =============================================================================
+# Export Cache Tests
+# =============================================================================
+
+
+class TestExportCache:
+    """Tests for ephemeral export cache used by MCP Resources."""
+
+    def test_cache_export_returns_id(self, sample_session: ResearchSession) -> None:
+        """Test caching an export returns a unique ID."""
+        from gemini_research_mcp.server import _cache_export, _export_cache
+
+        result = export_to_markdown(sample_session)
+        export_id = _cache_export(result, sample_session.interaction_id)
+
+        assert export_id is not None
+        assert len(export_id) == 12  # UUID[:12]
+        assert export_id in _export_cache
+
+        # Cleanup
+        del _export_cache[export_id]
+
+    def test_get_cached_export_returns_entry(
+        self, sample_session: ResearchSession
+    ) -> None:
+        """Test retrieving a cached export."""
+        from gemini_research_mcp.server import (
+            _cache_export,
+            _export_cache,
+            _get_cached_export,
+        )
+
+        result = export_to_markdown(sample_session)
+        export_id = _cache_export(result, sample_session.interaction_id)
+
+        entry = _get_cached_export(export_id)
+        assert entry is not None
+        assert entry.result == result
+        assert entry.session_id == sample_session.interaction_id
+        assert not entry.is_expired
+
+        # Cleanup
+        del _export_cache[export_id]
+
+    def test_get_cached_export_not_found(self) -> None:
+        """Test retrieving non-existent export returns None."""
+        from gemini_research_mcp.server import _get_cached_export
+
+        entry = _get_cached_export("nonexistent-id")
+        assert entry is None
+
+    def test_export_resource_returns_bytes(
+        self, sample_session: ResearchSession
+    ) -> None:
+        """Test the resource function returns binary content."""
+        from gemini_research_mcp.server import (
+            _cache_export,
+            _export_cache,
+            get_export_by_id,
+        )
+
+        result = export_to_markdown(sample_session)
+        export_id = _cache_export(result, sample_session.interaction_id)
+
+        content = get_export_by_id(export_id)
+        assert content == result.content
+        assert isinstance(content, bytes)
+
+        # Cleanup
+        del _export_cache[export_id]
+
+    def test_export_resource_raises_on_invalid_id(self) -> None:
+        """Test resource raises ValueError for invalid export ID."""
+        from gemini_research_mcp.server import get_export_by_id
+
+        with pytest.raises(ValueError, match="Export not found"):
+            get_export_by_id("invalid-id-123")
+
+    def test_list_exports_returns_json(
+        self, sample_session: ResearchSession
+    ) -> None:
+        """Test list_exports returns JSON with export metadata."""
+        from gemini_research_mcp.server import (
+            _cache_export,
+            _export_cache,
+            list_exports,
+        )
+
+        result = export_to_markdown(sample_session)
+        export_id = _cache_export(result, sample_session.interaction_id)
+
+        exports_json = list_exports()
+        data = json.loads(exports_json)
+
+        assert "exports" in data
+        assert "count" in data
+        assert data["count"] >= 1
+
+        # Find our export
+        our_export = next(
+            (e for e in data["exports"] if e["export_id"] == export_id), None
+        )
+        assert our_export is not None
+        assert our_export["filename"] == result.filename
+        assert our_export["format"] == "markdown"
+        assert "uri" in our_export
+        assert our_export["uri"] == f"research://exports/{export_id}"
+
+        # Cleanup
+        del _export_cache[export_id]
+
+    def test_cache_cleans_up_expired_entries(
+        self, sample_session: ResearchSession
+    ) -> None:
+        """Test that caching new exports cleans up expired entries."""
+        from datetime import UTC, datetime, timedelta
+
+        from gemini_research_mcp.server import (
+            EXPORT_TTL_SECONDS,
+            ExportCacheEntry,
+            _cache_export,
+            _export_cache,
+        )
+
+        # Create an expired entry manually
+        old_result = export_to_markdown(sample_session)
+        expired_entry = ExportCacheEntry(
+            result=old_result,
+            session_id="old-session",
+            created_at=datetime.now(UTC) - timedelta(seconds=EXPORT_TTL_SECONDS + 100),
+        )
+        _export_cache["expired-id"] = expired_entry
+        assert expired_entry.is_expired
+
+        # Cache a new export - should trigger cleanup
+        new_result = export_to_markdown(sample_session)
+        new_id = _cache_export(new_result, sample_session.interaction_id)
+
+        # Expired entry should be gone
+        assert "expired-id" not in _export_cache
+        assert new_id in _export_cache
+
+        # Cleanup
+        del _export_cache[new_id]

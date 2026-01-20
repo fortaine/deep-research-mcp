@@ -19,8 +19,11 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from mcp.server.experimental.task_support import TaskSupport
@@ -33,7 +36,11 @@ from gemini_research_mcp.citations import process_citations
 from gemini_research_mcp.config import LOGGER_NAME, get_deep_research_agent, get_model
 from gemini_research_mcp.deep import deep_research_stream, get_research_status
 from gemini_research_mcp.deep import research_followup as _research_followup
-from gemini_research_mcp.export import ExportFormat, export_session
+from gemini_research_mcp.export import (
+    ExportFormat,
+    ExportResult,
+    export_session,
+)
 from gemini_research_mcp.quick import generate_summary, quick_research, semantic_match_session
 from gemini_research_mcp.storage import (
     get_research_session,
@@ -48,6 +55,54 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+
+
+# =============================================================================
+# Ephemeral Export Cache
+# =============================================================================
+
+# TTL for exported files (1 hour)
+EXPORT_TTL_SECONDS = 3600
+
+
+@dataclass
+class ExportCacheEntry:
+    """Cached export result with TTL."""
+
+    result: ExportResult
+    session_id: str
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+    @property
+    def is_expired(self) -> bool:
+        """Check if the export has expired."""
+        return datetime.now(UTC) > self.created_at + timedelta(seconds=EXPORT_TTL_SECONDS)
+
+
+# In-memory cache for exports (keyed by export_id)
+_export_cache: dict[str, ExportCacheEntry] = {}
+
+
+def _cache_export(result: ExportResult, session_id: str) -> str:
+    """Cache an export and return its unique ID."""
+    # Clean up expired entries
+    expired_keys = [k for k, v in _export_cache.items() if v.is_expired]
+    for key in expired_keys:
+        del _export_cache[key]
+
+    export_id = str(uuid.uuid4())[:12]
+    _export_cache[export_id] = ExportCacheEntry(result=result, session_id=session_id)
+    logger.info("   💾 Cached export %s (%s)", export_id, result.size_human)
+    return export_id
+
+
+def _get_cached_export(export_id: str) -> ExportCacheEntry | None:
+    """Retrieve a cached export, or None if expired/missing."""
+    entry = _export_cache.get(export_id)
+    if entry and entry.is_expired:
+        del _export_cache[export_id]
+        return None
+    return entry
 
 
 # =============================================================================
@@ -763,10 +818,8 @@ async def export_research_session(
         query: Search for session by query text (alternative to interaction_id)
 
     Returns:
-        JSON with export details (filename, size, base64 content for docx)
+        JSON with export details and resource URI for download
     """
-    import base64
-
     logger.info(
         "📤 export_research_session: id=%s, format=%s, query=%s",
         interaction_id,
@@ -814,6 +867,13 @@ async def export_research_session(
                         matched_id[:12],
                         session.query[:50],
                     )
+                else:
+                    # Matched ID not found in sessions list - fall back to most recent
+                    session = sessions[0]
+                    logger.warning(
+                        "   ⚠️ Matched ID %s not in sessions, using most recent",
+                        matched_id[:12],
+                    )
             else:
                 # Fall back to most recent session
                 session = sessions[0]
@@ -836,12 +896,17 @@ async def export_research_session(
         # Export
         result = export_session(session, format)
 
+        # Cache the export for resource-based download
+        export_id = _cache_export(result, session.interaction_id)
+        resource_uri = f"research://exports/{export_id}"
+
         response: dict[str, Any] = {
             "success": True,
             "format": result.format.value,
             "filename": result.filename,
             "size": result.size_human,
             "mime_type": result.mime_type,
+            "resource_uri": resource_uri,
             "session": {
                 "interaction_id": session.interaction_id,
                 "query": session.query[:100],
@@ -849,15 +914,19 @@ async def export_research_session(
             },
         }
 
-        # For text formats, include content directly
+        # For text formats, also include content directly (small enough)
         if result.format in (ExportFormat.MARKDOWN, ExportFormat.JSON):
             response["content"] = result.content.decode("utf-8")
-        else:
-            # For binary formats (DOCX), include base64
-            response["content_base64"] = base64.b64encode(result.content).decode("ascii")
             response["hint"] = (
-                "Decode content_base64 and save as .docx file, "
-                "or use this in automation workflows."
+                f"Content included below. "
+                f"Resource URI: {resource_uri} (expires in 1 hour)"
+            )
+        else:
+            # For binary formats (DOCX), use resource URI for download
+            response["hint"] = (
+                f"Use resource URI to download: {resource_uri}\n"
+                "In VS Code: Click 'Save' or drag-drop from chat. "
+                "Expires in 1 hour."
             )
 
         return json.dumps(response, indent=2)
@@ -865,7 +934,7 @@ async def export_research_session(
     except ImportError as e:
         return json.dumps({
             "error": str(e),
-            "hint": "Install python-docx for DOCX export: pip install python-docx",
+            "hint": "Install skelmis-docx for DOCX export.",
         })
     except Exception as e:
         logger.exception("export_research_session failed: %s", e)
@@ -920,6 +989,72 @@ def get_research_models() -> str:
 - **Best for:** Clarification, elaboration, summarization of prior research
 - **Requires:** `previous_interaction_id` from completed research
 """
+
+
+@mcp.resource(
+    "research://exports/{export_id}",
+    name="Research Export",
+    description="Download an exported research report. Use export_research_session tool first.",
+    mime_type="application/octet-stream",
+)
+def get_export_by_id(export_id: str) -> bytes:
+    """
+    Retrieve an exported research report by its export ID.
+
+    The export_research_session tool creates exports and returns resource URIs.
+    This resource serves the binary content for download.
+
+    In VS Code Copilot, you can:
+    - Click "Save" to download the file
+    - Drag-and-drop from chat to your workspace
+
+    Args:
+        export_id: The unique export identifier from export_research_session
+
+    Returns:
+        Binary content of the exported file (Markdown, JSON, or DOCX)
+    """
+    entry = _get_cached_export(export_id)
+    if not entry:
+        raise ValueError(f"Export not found or expired: {export_id}")
+
+    logger.info("📥 Serving export %s (%s)", export_id, entry.result.filename)
+    return entry.result.content
+
+
+@mcp.resource(
+    "research://exports",
+    name="Available Exports",
+    description="List all currently cached exports ready for download.",
+    mime_type="application/json",
+)
+def list_exports() -> str:
+    """
+    List all currently cached exports.
+
+    Returns a JSON array of available exports with their metadata.
+    Exports expire after 1 hour.
+    """
+    # Clean up expired entries first
+    expired_keys = [k for k, v in _export_cache.items() if v.is_expired]
+    for key in expired_keys:
+        del _export_cache[key]
+
+    exports = []
+    for export_id, entry in _export_cache.items():
+        remaining = (entry.created_at + timedelta(seconds=EXPORT_TTL_SECONDS)) - datetime.now(UTC)
+        exports.append({
+            "export_id": export_id,
+            "uri": f"research://exports/{export_id}",
+            "filename": entry.result.filename,
+            "format": entry.result.format.value,
+            "size": entry.result.size_human,
+            "mime_type": entry.result.mime_type,
+            "session_id": entry.session_id[:12] + "...",
+            "expires_in": f"{max(0, int(remaining.total_seconds()))}s",
+        })
+
+    return json.dumps({"exports": exports, "count": len(exports)}, indent=2)
 
 
 # =============================================================================
