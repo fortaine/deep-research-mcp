@@ -45,11 +45,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# DOCX export uses pypandoc for high-quality Markdown→DOCX conversion
-# pypandoc_binary bundles Pandoc (~80MB) so users don't need system install
+# DOCX export uses marko (Markdown→AST) + python-docx (native DOCX generation)
+# Zero external runtime dependencies - pure Python, no Pandoc binary needed
 docx = [
-    "pypandoc>=1.13",
-    "pypandoc_binary>=1.13",
+    "marko>=2.0.0",
+    "python-docx>=1.1.0",
 ]
 dev = [
     "pytest>=8.0.0",
@@ -58,8 +58,8 @@ dev = [
     "pytest-timeout>=2.3.0",
     "mypy>=1.10.0",
     "ruff>=0.4.0",
-    "pypandoc>=1.13",
-    "pypandoc_binary>=1.13",
+    "marko>=2.0.0",
+    "python-docx>=1.1.0",
 ]
 
 [project.urls]
