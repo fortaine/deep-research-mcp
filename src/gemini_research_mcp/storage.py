@@ -84,6 +84,8 @@ class ResearchSession:
     query: str
     created_at: float  # Unix timestamp
     title: str | None = None  # Short descriptive title
+    summary: str | None = None  # AI-generated synopsis for discovery
+    report_text: str | None = None  # Full research report
     format_instructions: str | None = None
     agent_name: str | None = None
     duration_seconds: float | None = None
@@ -155,6 +157,8 @@ class ResearchSession:
             query=data["query"],
             created_at=data["created_at"],
             title=data.get("title"),
+            summary=data.get("summary"),
+            report_text=data.get("report_text"),
             format_instructions=data.get("format_instructions"),
             agent_name=data.get("agent_name"),
             duration_seconds=data.get("duration_seconds"),
@@ -164,8 +168,8 @@ class ResearchSession:
             notes=data.get("notes"),
         )
 
-    def summary(self) -> str:
-        """Return a short summary for listing."""
+    def short_description(self) -> str:
+        """Return a short description for listing."""
         title = self.title or self.query[:50]
         remaining = self.time_remaining_human or "unknown"
         return f"[{self.interaction_id[:12]}...] {title} (expires: {remaining})"
@@ -454,6 +458,8 @@ def save_research_session(
     query: str,
     *,
     title: str | None = None,
+    summary: str | None = None,
+    report_text: str | None = None,
     format_instructions: str | None = None,
     agent_name: str | None = None,
     duration_seconds: float | None = None,
@@ -467,6 +473,8 @@ def save_research_session(
         interaction_id: The Gemini interaction ID
         query: The research query
         title: Optional short title (defaults to query[:50])
+        summary: Optional AI-generated synopsis for discovery
+        report_text: Optional full research report
         format_instructions: Optional format instructions used
         agent_name: Optional agent name used
         duration_seconds: Optional research duration
@@ -481,6 +489,8 @@ def save_research_session(
         query=query,
         created_at=time.time(),
         title=title,
+        summary=summary,
+        report_text=report_text,
         format_instructions=format_instructions,
         agent_name=agent_name,
         duration_seconds=duration_seconds,

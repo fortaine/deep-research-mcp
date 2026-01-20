@@ -34,8 +34,6 @@ from gemini_research_mcp.deep import deep_research_stream, get_research_status
 from gemini_research_mcp.deep import research_followup as _research_followup
 from gemini_research_mcp.quick import quick_research
 from gemini_research_mcp.storage import (
-    get_research_session,
-    get_storage,
     list_research_sessions,
     save_research_session,
 )
@@ -97,14 +95,21 @@ Use for: research reports, competitive analysis, "compare", "analyze", "investig
 - Automatically asks clarifying questions for vague queries
 - Runs as background task with progress updates
 - Returns comprehensive report with citations
+- Sessions are saved for later follow-up
 
 ## Follow-up (research_followup)
-Continue conversation after deep research completes.
+Continue conversation with any previous deep research session.
 Use for: "elaborate", "clarify", "summarize", follow-up questions.
+Sessions last 55 days (paid tier).
+
+## List Sessions (list_research_sessions_tool)
+Find previous research sessions by query and summary.
+Use to discover old research before using research_followup.
 
 **Workflow:**
 - Simple questions → research_web
-- Complex questions → research_deep (handles everything automatically)
+- Complex questions → research_deep
+- Continue old research → list_research_sessions_tool → research_followup
 """,
     lifespan=lifespan,
 )
@@ -499,9 +504,20 @@ async def research_deep(
                 if result.usage and result.usage.total_tokens:
                     total_tokens = result.usage.total_tokens
 
+                # Generate summary (first 300 chars of report or query)
+                summary = None
+                if result.text:
+                    # Take first paragraph or first 300 chars
+                    first_para = result.text.split("\n\n")[0]
+                    summary = first_para[:300]
+                    if len(first_para) > 300:
+                        summary += "..."
+
                 save_research_session(
                     interaction_id=interaction_id,
                     query=effective_query,
+                    summary=summary,
+                    report_text=result.text,
                     format_instructions=format_instructions,
                     agent_name=get_deep_research_agent(),
                     duration_seconds=elapsed,
@@ -600,11 +616,6 @@ async def research_followup(
         return f"❌ Follow-up failed: {e}"
 
 
-# =============================================================================
-# Session Management Tools
-# =============================================================================
-
-
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
 async def list_research_sessions_tool(
     limit: Annotated[int, "Maximum number of sessions to return"] = 20,
@@ -614,10 +625,11 @@ async def list_research_sessions_tool(
     List saved research sessions available for follow-up.
 
     Sessions are automatically saved when deep research completes successfully.
-    Each session can be used with research_followup for up to 55 days (paid tier).
+    Each session shows a summary of findings for easy discovery.
+    Use research_followup with the interaction ID to continue a conversation.
 
     Returns:
-        List of research sessions with their interaction IDs and metadata
+        List of research sessions with summaries and interaction IDs
     """
     logger.info("📋 list_research_sessions: limit=%d, include_expired=%s", limit, include_expired)
 
@@ -636,16 +648,22 @@ async def list_research_sessions_tool(
         lines.extend([
             f"### {title}",
             f"- **ID:** `{session.interaction_id}`",
+            f"- **Query:** {session.query[:100]}{'...' if len(session.query) > 100 else ''}",
             f"- **Created:** {session.created_at_iso}",
             f"- **Expires in:** {session.time_remaining_human}",
         ])
+
+        # Show summary for easy discovery
+        if session.summary:
+            lines.extend([
+                "",
+                f"> {session.summary}",
+            ])
 
         if session.duration_seconds:
             lines.append(f"- **Duration:** {_format_duration(session.duration_seconds)}")
         if session.total_tokens:
             lines.append(f"- **Tokens:** {session.total_tokens:,}")
-        if session.tags:
-            lines.append(f"- **Tags:** {', '.join(session.tags)}")
 
         lines.append("")
 
@@ -655,155 +673,6 @@ async def list_research_sessions_tool(
     ])
 
     return "\n".join(lines)
-
-
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
-async def get_research_session_tool(
-    interaction_id: Annotated[str, "The interaction ID of the research session"],
-) -> str:
-    """
-    Get details of a specific research session.
-
-    Args:
-        interaction_id: The interaction ID from a previous deep research
-
-    Returns:
-        Session details including query, metadata, and expiration status
-    """
-    logger.info("🔍 get_research_session: %s", interaction_id[:16])
-
-    session = get_research_session(interaction_id)
-
-    if session is None:
-        return f"❌ Session not found or expired: `{interaction_id}`"
-
-    lines = [
-        "## Research Session Details",
-        "",
-        f"**Interaction ID:** `{session.interaction_id}`",
-        "",
-        "### Query",
-        session.query,
-        "",
-        "### Metadata",
-        f"- **Created:** {session.created_at_iso}",
-        f"- **Expires:** {session.expires_at_iso}",
-        f"- **Time Remaining:** {session.time_remaining_human}",
-    ]
-
-    if session.format_instructions:
-        lines.extend(["", "### Format Instructions", session.format_instructions])
-
-    if session.duration_seconds:
-        lines.append(f"- **Duration:** {_format_duration(session.duration_seconds)}")
-    if session.total_tokens:
-        lines.append(f"- **Tokens:** {session.total_tokens:,}")
-    if session.agent_name:
-        lines.append(f"- **Agent:** {session.agent_name}")
-    if session.tags:
-        lines.append(f"- **Tags:** {', '.join(session.tags)}")
-    if session.notes:
-        lines.extend(["", "### Notes", session.notes])
-
-    lines.extend([
-        "",
-        "---",
-        "*Use `research_followup` with this interaction ID to ask follow-up questions.*",
-    ])
-
-    return "\n".join(lines)
-
-
-@mcp.tool()
-async def update_research_session_tool(
-    interaction_id: Annotated[str, "The interaction ID of the research session"],
-    title: Annotated[str | None, "New title for the session"] = None,
-    tags: Annotated[list[str] | None, "New tags for the session"] = None,
-    notes: Annotated[str | None, "Notes to add to the session"] = None,
-) -> str:
-    """
-    Update metadata of a research session (title, tags, notes).
-
-    Useful for organizing and annotating research sessions for later retrieval.
-
-    Args:
-        interaction_id: The interaction ID of the session to update
-        title: Optional new title
-        tags: Optional list of tags (replaces existing tags)
-        notes: Optional notes to add
-
-    Returns:
-        Confirmation of the update
-    """
-    logger.info("✏️ update_research_session: %s", interaction_id[:16])
-
-    storage = get_storage()
-    session = storage.update_session(
-        interaction_id,
-        title=title,
-        tags=tags,
-        notes=notes,
-    )
-
-    if session is None:
-        return f"❌ Session not found or expired: `{interaction_id}`"
-
-    updates = []
-    if title:
-        updates.append(f"title → '{title}'")
-    if tags:
-        updates.append(f"tags → {tags}")
-    if notes:
-        updates.append("notes updated")
-
-    return f"✅ Session updated: {', '.join(updates)}"
-
-
-@mcp.tool()
-async def delete_research_session_tool(
-    interaction_id: Annotated[str, "The interaction ID of the research session to delete"],
-) -> str:
-    """
-    Delete a research session from local storage.
-
-    Note: This only removes the local record. The interaction may still be
-    accessible on Gemini's servers until it expires (55 days for paid tier).
-
-    Args:
-        interaction_id: The interaction ID of the session to delete
-
-    Returns:
-        Confirmation of deletion
-    """
-    logger.info("🗑️ delete_research_session: %s", interaction_id[:16])
-
-    storage = get_storage()
-    if storage.delete_session(interaction_id):
-        return f"✅ Session deleted: `{interaction_id[:16]}...`"
-    else:
-        return f"❌ Session not found: `{interaction_id}`"
-
-
-@mcp.tool()
-async def cleanup_expired_sessions_tool() -> str:
-    """
-    Remove all expired research sessions from local storage.
-
-    Expired sessions can no longer be used for follow-up questions
-    as Gemini has deleted the interaction data.
-
-    Returns:
-        Number of sessions cleaned up
-    """
-    logger.info("🧹 cleanup_expired_sessions")
-
-    storage = get_storage()
-    count = storage.cleanup_expired()
-
-    if count == 0:
-        return "✅ No expired sessions to clean up."
-    else:
-        return f"✅ Cleaned up {count} expired session(s)."
 
 
 # =============================================================================

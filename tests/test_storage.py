@@ -125,11 +125,11 @@ class TestResearchSession:
         assert restored.query == sample_session.query
         assert restored.tags == sample_session.tags
 
-    def test_summary(self, sample_session: ResearchSession) -> None:
-        """Test summary generation."""
-        summary = sample_session.summary()
-        assert "test-intera" in summary
-        assert "Quantum Computing Research" in summary
+    def test_short_description(self, sample_session: ResearchSession) -> None:
+        """Test short description generation."""
+        desc = sample_session.short_description()
+        assert "test-intera" in desc
+        assert "Quantum Computing Research" in desc
 
 
 # =============================================================================
