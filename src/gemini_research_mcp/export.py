@@ -439,7 +439,7 @@ def _add_static_toc(doc: Any, session: Any, toc_levels: int = 3) -> None:
 
         # Indentation based on level
         if level == 1:
-            indent = 0
+            indent = 0.0
             font_size = 12
             bold = True
         elif level == 2:
@@ -624,7 +624,7 @@ def export_to_docx(
 
     # Page break before main report
     if session.report_text:
-        doc.add_page_break()
+        doc.add_page_break()  # type: ignore[no-untyped-call]
 
     # Research report section
     if session.report_text:
