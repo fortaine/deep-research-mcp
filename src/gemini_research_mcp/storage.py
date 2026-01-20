@@ -300,7 +300,11 @@ class SessionStorage:
             if data is None:
                 continue
 
-            session = ResearchSession.from_dict(data)
+            try:
+                session = ResearchSession.from_dict(data)
+            except KeyError as e:
+                logger.warning("Skipping corrupted session %s: %s", interaction_id[:16], e)
+                continue
 
             if not include_expired and session.is_expired:
                 continue

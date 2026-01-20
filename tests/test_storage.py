@@ -215,6 +215,27 @@ class TestSessionStorageAsync:
         assert sessions[0].interaction_id == "test-1"
 
     @pytest.mark.asyncio
+    async def test_list_sessions_skips_corrupted_entries(
+        self, temp_storage: SessionStorage, sample_session: ResearchSession
+    ) -> None:
+        """Test that listing sessions skips corrupted entries gracefully."""
+        # Save a valid session
+        await temp_storage.save_session_async(sample_session)
+
+        # Manually write a corrupted entry (missing required 'query' field)
+        corrupted_data = {"interaction_id": "corrupted-123", "created_at": 12345.0}
+        await temp_storage._store.put(
+            "corrupted-123",
+            corrupted_data,
+            collection="sessions",
+        )
+
+        # Listing should succeed and only return the valid session
+        sessions = await temp_storage.list_sessions_async()
+        assert len(sessions) == 1
+        assert sessions[0].interaction_id == sample_session.interaction_id
+
+    @pytest.mark.asyncio
     async def test_delete_session(
         self, temp_storage: SessionStorage, sample_session: ResearchSession
     ) -> None:

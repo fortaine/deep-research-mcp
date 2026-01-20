@@ -248,8 +248,8 @@ def _add_formatted_text(paragraph: Any, text: str) -> None:
     Add text with inline formatting (bold/italic) to a python-docx paragraph.
 
     Handles:
-    - **bold** or __bold__
-    - *italic* or _italic_
+    - **bold** (asterisk style)
+    - *italic* (asterisk style)
     - `code` (monospace)
     """
     # Pattern to match bold, italic, and code
@@ -308,7 +308,7 @@ def export_to_docx(
     except ImportError as e:
         raise ImportError(
             "skelmis-docx is required for DOCX export. "
-            "Install with: pip install skelmis-docx"
+            "Install with: pip install 'gemini-research-mcp[docx]'"
         ) from e
 
     doc = Document()

@@ -375,7 +375,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4.0" },
     { name = "skelmis-docx", marker = "extra == 'dev'", git = "https://github.com/fortaine/python-docx.git?rev=fix%2Fpywin32-version-constraint" },
-    { name = "skelmis-docx", marker = "extra == 'docx'", git = "https://github.com/fortaine/python-docx.git?rev=fix%2Fpywin32-version-constraint" },
+    { name = "skelmis-docx", marker = "extra == 'docx'", git = "https://github.com/fortaine/python-docx.git?rev=06d0809bb29f561051dfcc142c03a9d96f439f89" },
 ]
 provides-extras = ["dev", "docx"]
 
@@ -1178,7 +1178,7 @@ wheels = [
 [[package]]
 name = "skelmis-docx"
 version = "2.5.0"
-source = { git = "https://github.com/fortaine/python-docx.git?rev=fix%2Fpywin32-version-constraint#06d0809bb29f561051dfcc142c03a9d96f439f89" }
+source = { git = "https://github.com/fortaine/python-docx.git?rev=06d0809bb29f561051dfcc142c03a9d96f439f89#06d0809bb29f561051dfcc142c03a9d96f439f89" }
 dependencies = [
     { name = "lxml" },
     { name = "pywin32", marker = "sys_platform == 'windows'" },

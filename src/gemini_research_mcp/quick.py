@@ -232,11 +232,12 @@ async def semantic_match_session(
     client = genai.Client(api_key=get_api_key())
     model = get_summary_model()
 
-    # Build session list for prompt
+    # Build session list for prompt (truncate summaries to avoid context overflow)
     session_list = []
     for i, s in enumerate(sessions, 1):
+        summary = s.get('summary', 'No summary')[:300]  # Limit summary length
         session_list.append(
-            f"{i}. [{s['id']}] \"{s['query']}\"\n   Summary: {s.get('summary', 'No summary')}"
+            f"{i}. [{s['id']}] \"{s['query'][:100]}\"\n   Summary: {summary}"
         )
 
     prompt = f"""Given these research sessions and a user's follow-up question,
