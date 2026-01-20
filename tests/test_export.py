@@ -211,8 +211,9 @@ class TestDocxExport:
 
     def test_export_to_docx_basic(self, sample_session: ResearchSession) -> None:
         """Test basic DOCX export."""
-        # Import check - skip if pypandoc not installed
-        pytest.importorskip("pypandoc")
+        # Import check - skip if marko/python-docx not installed
+        pytest.importorskip("marko")
+        pytest.importorskip("docx")
 
         from gemini_research_mcp.export import export_to_docx
 
@@ -225,7 +226,8 @@ class TestDocxExport:
 
     def test_docx_is_valid_zip(self, sample_session: ResearchSession) -> None:
         """Test that DOCX output is a valid ZIP archive (OOXML format)."""
-        pytest.importorskip("pypandoc")
+        pytest.importorskip("marko")
+        pytest.importorskip("docx")
 
         from io import BytesIO
         from zipfile import ZipFile
@@ -243,7 +245,8 @@ class TestDocxExport:
 
     def test_docx_minimal_session(self, minimal_session: ResearchSession) -> None:
         """Test DOCX export with minimal session."""
-        pytest.importorskip("pypandoc")
+        pytest.importorskip("marko")
+        pytest.importorskip("docx")
 
         from gemini_research_mcp.export import export_to_docx
 
@@ -251,10 +254,238 @@ class TestDocxExport:
         assert len(result.content) > 0
 
     def test_docx_import_error(self, sample_session: ResearchSession) -> None:
-        """Test that missing pypandoc raises helpful error."""
+        """Test that missing marko/docx raises helpful error."""
         # This test is informational - we can't easily test ImportError
-        # when pypandoc is installed in dev environment
+        # when dependencies are installed in dev environment
         pass
+
+    def test_docx_has_professional_styling(self, sample_session: ResearchSession) -> None:
+        """Test DOCX has professional page margins and styles configured."""
+        pytest.importorskip("marko")
+        pytest.importorskip("docx")
+
+        from io import BytesIO
+
+        from docx import Document
+        from docx.shared import Cm
+
+        result = export_to_docx(sample_session)
+        doc = Document(BytesIO(result.content))
+
+        # Check page margins are set to 1 inch (2.54 cm)
+        for section in doc.sections:
+            assert section.top_margin == Cm(2.54)
+            assert section.bottom_margin == Cm(2.54)
+            assert section.left_margin == Cm(2.54)
+            assert section.right_margin == Cm(2.54)
+
+    def test_docx_contains_cover_page(self, sample_session: ResearchSession) -> None:
+        """Test DOCX includes cover page with title."""
+        pytest.importorskip("marko")
+        pytest.importorskip("docx")
+
+        from io import BytesIO
+
+        from docx import Document
+
+        result = export_to_docx(sample_session)
+        doc = Document(BytesIO(result.content))
+
+        # First meaningful content should be the title
+        text_content = " ".join(p.text for p in doc.paragraphs[:10])
+        assert sample_session.title in text_content
+
+    def test_docx_contains_toc(self, sample_session: ResearchSession) -> None:
+        """Test DOCX includes Table of Contents."""
+        pytest.importorskip("marko")
+        pytest.importorskip("docx")
+
+        from io import BytesIO
+
+        from docx import Document
+
+        result = export_to_docx(sample_session)
+        doc = Document(BytesIO(result.content))
+
+        text_content = " ".join(p.text for p in doc.paragraphs)
+        assert "Table of Contents" in text_content
+
+    def test_docx_contains_document_info(self, sample_session: ResearchSession) -> None:
+        """Test DOCX includes Document Information section."""
+        pytest.importorskip("marko")
+        pytest.importorskip("docx")
+
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        result = export_to_docx(sample_session)
+
+        # Check XML content for Document Information and session ID
+        with ZipFile(BytesIO(result.content)) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            assert "Document Information" in doc_xml
+            # Interaction ID should be in the metadata table
+            assert sample_session.interaction_id in doc_xml
+
+    def test_docx_toc_has_clickable_links(self, sample_session: ResearchSession) -> None:
+        """Test TOC entries are internal hyperlinks."""
+        pytest.importorskip("marko")
+        pytest.importorskip("docx")
+
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        result = export_to_docx(sample_session)
+
+        # Parse the document XML to check for hyperlinks with anchors
+        with ZipFile(BytesIO(result.content)) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            # Internal hyperlinks use w:anchor attribute
+            assert "w:anchor" in doc_xml
+
+    def test_docx_headings_have_bookmarks(self, sample_session: ResearchSession) -> None:
+        """Test headings have bookmarks for TOC navigation."""
+        pytest.importorskip("marko")
+        pytest.importorskip("docx")
+
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        result = export_to_docx(sample_session)
+
+        # Parse the document XML to check for bookmarks
+        with ZipFile(BytesIO(result.content)) as zf:
+            doc_xml = zf.read("word/document.xml").decode("utf-8")
+            # Bookmarks use w:bookmarkStart element
+            assert "w:bookmarkStart" in doc_xml
+            assert "w:bookmarkEnd" in doc_xml
+
+    def test_docx_without_cover_page(self, sample_session: ResearchSession) -> None:
+        """Test DOCX export without cover page option."""
+        pytest.importorskip("marko")
+        pytest.importorskip("docx")
+
+        from io import BytesIO
+
+        from docx import Document
+
+        result = export_to_docx(sample_session, include_cover_page=False)
+        doc = Document(BytesIO(result.content))
+
+        # First paragraph should be TOC or Document Info, not spacers
+        first_texts = [p.text.strip() for p in doc.paragraphs[:5] if p.text.strip()]
+        # Should still have content
+        assert len(first_texts) > 0
+
+    def test_docx_without_toc(self, sample_session: ResearchSession) -> None:
+        """Test DOCX export without TOC option."""
+        pytest.importorskip("marko")
+        pytest.importorskip("docx")
+
+        from io import BytesIO
+
+        from docx import Document
+
+        result = export_to_docx(sample_session, include_toc=False)
+        doc = Document(BytesIO(result.content))
+
+        text_content = " ".join(p.text for p in doc.paragraphs)
+        # Should not have TOC heading (but Document Information should exist)
+        assert "Table of Contents" not in text_content
+        assert "Document Information" in text_content
+
+    def test_docx_sources_hyperlinks(self, sample_session: ResearchSession) -> None:
+        """Test that sources section contains proper hyperlinks."""
+        pytest.importorskip("marko")
+        pytest.importorskip("docx")
+
+        from io import BytesIO
+        from zipfile import ZipFile
+
+        result = export_to_docx(sample_session)
+
+        # Parse the document relationships to check for external hyperlinks
+        with ZipFile(BytesIO(result.content)) as zf:
+            rels_xml = zf.read("word/_rels/document.xml.rels").decode("utf-8")
+            # External hyperlinks should be registered
+            assert "example.com" in rels_xml or "hyperlink" in rels_xml.lower()
+
+    def test_docx_ordered_list_starts_from_one(self) -> None:
+        """Test ordered lists always start from 1."""
+        pytest.importorskip("marko")
+        pytest.importorskip("docx")
+
+        from io import BytesIO
+
+        from docx import Document
+
+        # Create session with numbered list that starts from arbitrary number
+        session = ResearchSession(
+            interaction_id="list-test-123",
+            query="Test query",
+            created_at=time.time(),
+            report_text="""## Test Section
+
+4. First item
+5. Second item
+6. Third item
+""",
+        )
+
+        result = export_to_docx(session)
+        doc = Document(BytesIO(result.content))
+
+        # Find paragraphs that look like list items
+        list_texts = [p.text for p in doc.paragraphs if p.text.strip().startswith(("1.", "2.", "3."))]
+        assert len(list_texts) >= 3
+        assert any("1." in t for t in list_texts)
+
+
+# =============================================================================
+# Bookmark and Internal Link Tests
+# =============================================================================
+
+
+class TestBookmarkGeneration:
+    """Tests for bookmark ID generation."""
+
+    def test_create_bookmark_id_basic(self) -> None:
+        """Test basic bookmark ID generation."""
+        from gemini_research_mcp.export import _create_bookmark_id
+
+        bookmark = _create_bookmark_id("Introduction", 0)
+        assert bookmark.startswith("_bm_0_")
+        assert "Introduction" in bookmark
+
+    def test_create_bookmark_id_with_special_chars(self) -> None:
+        """Test bookmark ID handles special characters."""
+        from gemini_research_mcp.export import _create_bookmark_id
+
+        bookmark = _create_bookmark_id("1.2 The Rise of \"Vibe Coding\"", 5)
+        assert bookmark.startswith("_bm_5_")
+        # Should not contain special chars
+        assert '"' not in bookmark
+        assert "." not in bookmark
+        assert " " not in bookmark
+
+    def test_create_bookmark_id_unique_per_index(self) -> None:
+        """Test same title with different indices creates unique IDs."""
+        from gemini_research_mcp.export import _create_bookmark_id
+
+        bm1 = _create_bookmark_id("Section", 0)
+        bm2 = _create_bookmark_id("Section", 1)
+        assert bm1 != bm2
+
+    def test_create_bookmark_id_starts_with_valid_char(self) -> None:
+        """Test bookmark ID starts with letter or underscore (valid for Word)."""
+        from gemini_research_mcp.export import _create_bookmark_id
+
+        # Title starting with number
+        bookmark = _create_bookmark_id("123 Numbers First", 0)
+        # Bookmark IDs starting with underscore are valid in Word
+        assert bookmark[0].isalpha() or bookmark[0] == "_"
+        # Should contain the index for uniqueness
+        assert "_0_" in bookmark
 
 
 # =============================================================================
@@ -282,13 +513,15 @@ class TestExportSession:
 
     def test_export_session_docx(self, sample_session: ResearchSession) -> None:
         """Test DOCX export via export_session."""
-        pytest.importorskip("pypandoc")
+        pytest.importorskip("marko")
+        pytest.importorskip("docx")
         result = export_session(sample_session, "docx")
         assert result.format == ExportFormat.DOCX
 
     def test_export_session_word_alias(self, sample_session: ResearchSession) -> None:
         """Test 'word' alias for DOCX."""
-        pytest.importorskip("pypandoc")
+        pytest.importorskip("marko")
+        pytest.importorskip("docx")
         result = export_session(sample_session, "word")
         assert result.format == ExportFormat.DOCX
 
