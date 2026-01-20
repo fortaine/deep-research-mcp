@@ -64,6 +64,7 @@ uv sync
 |----------|----------|---------|-------------|
 | `GEMINI_API_KEY` | **Yes** | — | [Google AI Studio API key](https://aistudio.google.com/apikey) |
 | `GEMINI_MODEL` | No | `gemini-3-flash-preview` | Model for `research_web` |
+| `GEMINI_SUMMARY_MODEL` | No | `gemini-3.0-flash` | Model for session summaries (fast) |
 | `DEEP_RESEARCH_AGENT` | No | `deep-research-pro-preview-12-2025` | Agent for `research_deep` |
 
 ```bash
@@ -101,7 +102,7 @@ Or run from source:
   "servers": {
     "gemini-research": {
       "command": "uv",
-      "args": ["--directory", "path/to/gemini-research-mcp", "run", "gemini-research-mcp"],
+      "args": ["run", "--directory", "path/to/gemini-research-mcp", "gemini-research-mcp"],
       "envFile": "${workspaceFolder}/path/to/gemini-research-mcp/.env"
     }
   }
@@ -147,7 +148,7 @@ uv add 'gemini-research-mcp[docx]'
 | **Page Margins** | Standard 1-inch (2.54cm) margins |
 | **Heading Spacing** | `keep_with_next` prevents orphan headings |
 | **Sources** | Full URLs as clickable hyperlinks |
-| **Zero Dependencies** | Pure Python, no Pandoc binary needed |
+| **Pure Python** | No external binaries (Pandoc not required) |
 
 ## Development
 
