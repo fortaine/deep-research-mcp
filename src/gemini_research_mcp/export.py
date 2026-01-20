@@ -284,7 +284,6 @@ def _setup_docx_styles(doc: Any) -> None:
     """Configure document styles for professional appearance."""
     try:
         from skelmis.docx.shared import Pt, RGBColor
-        from skelmis.docx.enum.style import WD_STYLE_TYPE
     except ImportError:
         return
 
@@ -321,8 +320,8 @@ def _setup_docx_styles(doc: Any) -> None:
 def _add_cover_page(doc: Any, session: Any) -> None:
     """Add a professional cover page."""
     try:
-        from skelmis.docx.shared import Pt
         from skelmis.docx.enum.text import WD_ALIGN_PARAGRAPH
+        from skelmis.docx.shared import Pt
     except ImportError:
         return
 
@@ -403,8 +402,7 @@ def _add_static_toc(doc: Any, session: Any, toc_levels: int = 3) -> None:
     that don't require manual updating.
     """
     try:
-        from skelmis.docx.shared import Pt, Inches
-        from skelmis.docx.enum.text import WD_ALIGN_PARAGRAPH
+        from skelmis.docx.shared import Inches, Pt
     except ImportError:
         return
 
@@ -467,9 +465,9 @@ def _add_static_toc(doc: Any, session: Any, toc_levels: int = 3) -> None:
 def _add_metadata_table(doc: Any, session: Any) -> None:
     """Add metadata as a formatted table."""
     try:
-        from skelmis.docx.shared import Pt, Inches, RGBColor
-        from skelmis.docx.oxml.ns import qn
         from skelmis.docx.oxml import OxmlElement
+        from skelmis.docx.oxml.ns import qn
+        from skelmis.docx.shared import Pt
     except ImportError:
         return
 
@@ -537,9 +535,9 @@ def _add_metadata_table(doc: Any, session: Any) -> None:
 def _add_executive_summary(doc: Any, summary: str) -> None:
     """Add an executive summary with special formatting."""
     try:
-        from skelmis.docx.shared import Pt, Inches
-        from skelmis.docx.oxml.ns import qn
         from skelmis.docx.oxml import OxmlElement
+        from skelmis.docx.oxml.ns import qn
+        from skelmis.docx.shared import Pt
     except ImportError:
         doc.add_heading("Executive Summary", level=1)
         doc.add_paragraph(summary)
