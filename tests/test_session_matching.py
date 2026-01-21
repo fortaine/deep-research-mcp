@@ -207,9 +207,13 @@ class TestExportSessionMatching:
             )
 
             mock_get.assert_called_once_with("explicit-session-id")
-            data = json.loads(result)
-            assert data["success"] is True
-            assert data["session"]["interaction_id"] == quantum_session.interaction_id
+            # Result is now [TextContent, EmbeddedResource] for successful exports
+            assert isinstance(result, list)
+            assert len(result) == 2
+            # Extract JSON content from EmbeddedResource's TextResourceContents
+            embedded = result[1]
+            data = json.loads(embedded.resource.text)
+            assert data["interaction_id"] == quantum_session.interaction_id
 
     @pytest.mark.asyncio
     async def test_semantic_match_found(
@@ -240,9 +244,11 @@ class TestExportSessionMatching:
             )
 
             mock_semantic.assert_called_once()
-            data = json.loads(result)
-            assert data["success"] is True
-            assert data["session"]["interaction_id"] == climate_session.interaction_id
+            # Result is now [TextContent, EmbeddedResource] for successful exports
+            assert isinstance(result, list)
+            embedded = result[1]
+            data = json.loads(embedded.resource.text)
+            assert data["interaction_id"] == climate_session.interaction_id
 
     @pytest.mark.asyncio
     async def test_fallback_to_most_recent_when_no_match(
@@ -273,10 +279,12 @@ class TestExportSessionMatching:
                 format="json",
             )
 
-            data = json.loads(result)
-            assert data["success"] is True
+            # Result is now [TextContent, EmbeddedResource] for successful exports
+            assert isinstance(result, list)
+            embedded = result[1]
+            data = json.loads(embedded.resource.text)
             # Should fall back to most recent session
-            assert data["session"]["interaction_id"] == recent_session.interaction_id
+            assert data["interaction_id"] == recent_session.interaction_id
 
     @pytest.mark.asyncio
     async def test_default_to_most_recent_no_query(
@@ -295,9 +303,11 @@ class TestExportSessionMatching:
         ):
             result = await export_research_session(format="json")
 
-            data = json.loads(result)
-            assert data["success"] is True
-            assert data["session"]["interaction_id"] == recent_session.interaction_id
+            # Result is now [TextContent, EmbeddedResource] for successful exports
+            assert isinstance(result, list)
+            embedded = result[1]
+            data = json.loads(embedded.resource.text)
+            assert data["interaction_id"] == recent_session.interaction_id
 
     @pytest.mark.asyncio
     async def test_no_sessions_available(self) -> None:
