@@ -24,3 +24,6 @@ htmlcov/
 # Build
 dist/
 build/
+
+# Review files
+*review.md
