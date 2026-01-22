@@ -50,6 +50,7 @@ from gemini_research_mcp.export import (
 )
 from gemini_research_mcp.quick import (
     generate_session_metadata,
+    generate_title_from_query,
     quick_research,
     semantic_match_session,
 )
@@ -136,13 +137,32 @@ def get_task_support() -> TaskSupport:
 
 @asynccontextmanager
 async def lifespan(app: FastMCP) -> AsyncIterator[None]:
-    """Initialize task support during server startup."""
+    """Initialize task support and check for resumable sessions on startup."""
     global _task_support
 
     # Enable experimental task support on the low-level server
     _task_support = app._mcp_server.experimental.enable_tasks()
 
     logger.info("✅ Experimental task support enabled")
+
+    # Check for resumable sessions from previous runs
+    try:
+        resumable = list_resumable_sessions(limit=10)
+        if resumable:
+            logger.info("=" * 60)
+            logger.info("🔄 RESUMABLE SESSIONS FOUND (%d)", len(resumable))
+            for session in resumable:
+                status_emoji = "⏳" if session.status == ResearchStatus.IN_PROGRESS else "⚠️"
+                logger.info(
+                    "   %s [%s] %s",
+                    status_emoji,
+                    session.interaction_id[:12],
+                    session.query[:60],
+                )
+            logger.info("   💡 Use resume_research tool to recover these sessions")
+            logger.info("=" * 60)
+    except Exception as e:
+        logger.warning("Failed to check for resumable sessions: %s", e)
 
     async with _task_support.run():
         yield
@@ -533,6 +553,7 @@ async def research_deep(
         action_count = 0
         interaction_id: str | None = None
         session_saved = False  # Track if we saved session at start
+        initial_title: str | None = None  # Generated title for the session
 
         # Consume the stream to get interaction_id and track progress
         async for event in deep_research_stream(
@@ -547,10 +568,16 @@ async def research_deep(
                 # === RESUME SUPPORT: Save session at START with in_progress status ===
                 if not session_saved:
                     try:
+                        # Generate a proper title from the query (fast, ~$0.0001)
+                        initial_title = await generate_title_from_query(effective_query)
+                        if not initial_title:
+                            initial_title = effective_query[:60]  # Fallback
+                        logger.info("   📝 Generated title: %s", initial_title)
+
                         save_research_session(
                             interaction_id=interaction_id,
                             query=effective_query,
-                            title=effective_query[:80],  # Placeholder until completion
+                            title=initial_title,
                             format_instructions=format_instructions,
                             agent_name=get_deep_research_agent(),
                             status=ResearchStatus.IN_PROGRESS,
