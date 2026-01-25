@@ -25,5 +25,8 @@ htmlcov/
 dist/
 build/
 
+# Playwright MCP artifacts
+.playwright-mcp/
+
 # Review files
 *review.md
