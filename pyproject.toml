@@ -38,9 +38,19 @@ dependencies = [
     "mcp>=1.25.0,<2.0.0",
     "httpx>=0.28.1",
     "python-dotenv>=1.0.0",
+    # Persistent storage using industry-standard key-value interface (used by FastMCP, agentpool, etc.)
+    "py-key-value-aio[disk]>=0.3.0",
+    # XDG-compliant platform-specific directories
+    "platformdirs>=4.0.0",
 ]
 
 [project.optional-dependencies]
+# DOCX export uses pypandoc for high-quality Markdown→DOCX conversion
+# pypandoc_binary bundles Pandoc (~80MB) so users don't need system install
+docx = [
+    "pypandoc>=1.13",
+    "pypandoc_binary>=1.13",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
@@ -48,6 +58,8 @@ dev = [
     "pytest-timeout>=2.3.0",
     "mypy>=1.10.0",
     "ruff>=0.4.0",
+    "pypandoc>=1.13",
+    "pypandoc_binary>=1.13",
 ]
 
 [project.urls]
@@ -65,6 +77,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 source = "vcs"
+
+[tool.hatch.metadata]
+# Allow git+ references for dependencies (needed for fork while waiting for upstream PR merge)
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gemini_research_mcp"]
