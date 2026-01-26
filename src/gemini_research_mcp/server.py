@@ -47,7 +47,11 @@ from gemini_research_mcp.export import (
     ExportResult,
     export_session,
 )
-from gemini_research_mcp.quick import generate_summary, quick_research, semantic_match_session
+from gemini_research_mcp.quick import (
+    generate_session_metadata,
+    quick_research,
+    semantic_match_session,
+)
 from gemini_research_mcp.storage import (
     get_research_session,
     list_research_sessions,
@@ -581,22 +585,19 @@ async def research_deep(
                 if result.usage and result.usage.total_tokens:
                     total_tokens = result.usage.total_tokens
 
-                # Generate summary (first 300 chars of report or query)
-                summary = None
-                if result.text:
-                    # Use AI to generate concise summary (~$0.0003/call)
-                    summary = await generate_summary(
-                        text=result.text,
-                        query=effective_query,
-                        max_chars=300,
-                    )
+                # Generate title and summary in one call (~$0.0003/call)
+                metadata = await generate_session_metadata(
+                    text=result.text or "",
+                    query=effective_query,
+                )
 
                 # Save session for later follow-up (guard against filesystem errors)
                 try:
                     save_research_session(
                         interaction_id=interaction_id,
                         query=effective_query,
-                        summary=summary,
+                        title=metadata.title or None,
+                        summary=metadata.summary or None,
                         report_text=result.text,
                         format_instructions=format_instructions,
                         agent_name=get_deep_research_agent(),
@@ -907,70 +908,58 @@ async def export_research_session(
         # Export
         result = export_session(session, format)
 
-        # Cache the export for resource-based download
-        export_id = _cache_export(result, session.interaction_id)
-
-        # For binary formats (DOCX), return EmbeddedResource directly for VS Code "Save As"
+        # Return EmbeddedResource for all formats to enable VS Code "Save As" button
         # Following the ElevenLabs MCP pattern: put filename in URI for browser-like save dialog
+        import base64
+
+        # URI contains filename so clients extract it for "Save As" dialog (like browsers)
+        resource_uri = f"research://{result.filename}"
+
+        # For text formats (MD, JSON), use TextResourceContents
+        # For binary formats (DOCX), use BlobResourceContents
         if result.format == ExportFormat.DOCX:
-            import base64
-
-            # URI contains filename so clients extract it for "Save As" dialog (like browsers)
-            resource_uri = f"research://{result.filename}"
-
-            # Create EmbeddedResource with BlobResourceContents for binary file
-            blob_content = BlobResourceContents(
+            resource_content: BlobResourceContents | TextResourceContents = BlobResourceContents(
                 uri=AnyUrl(resource_uri),
                 mimeType=result.mime_type,
                 blob=base64.b64encode(result.content).decode("ascii"),
             )
-            embedded = EmbeddedResource(
-                type="resource",
-                resource=blob_content,
+        else:
+            # Text formats - use TextResourceContents
+            resource_content = TextResourceContents(
+                uri=AnyUrl(resource_uri),
+                mimeType=result.mime_type,
+                text=result.content.decode("utf-8"),
             )
 
-            # Return metadata as TextContent + file as EmbeddedResource
-            # This enables VS Code's native "Save As" functionality
-            metadata_text = (
-                f"📄 **DOCX Export Complete**\n\n"
-                f"- **Filename:** {result.filename}\n"
-                f"- **Size:** {result.size_human}\n"
-                f"- **Session:** {session.query[:80]}\n"
-                f"- **Resource URI:** {resource_uri}\n\n"
-                f"The DOCX file is attached below. Use 'Save As' to download."
-            )
-            text_content = TextContent(
-                type="text",
-                text=metadata_text,
-            )
-
-            return [text_content, embedded]
-
-        # For text formats, use export ID in URI (for resource download endpoint)
-        resource_uri = f"research://exports/{export_id}"
-
-        # For text formats, include content directly
-        response: dict[str, Any] = {
-            "success": True,
-            "format": result.format.value,
-            "filename": result.filename,
-            "size": result.size_human,
-            "mime_type": result.mime_type,
-            "resource_uri": resource_uri,
-            "session": {
-                "interaction_id": session.interaction_id,
-                "query": session.query[:100],
-                "title": session.title,
-            },
-        }
-
-        response["content"] = result.content.decode("utf-8")
-        response["hint"] = (
-            f"Content included below. "
-            f"Resource URI: {resource_uri} (expires in 1 hour)"
+        embedded = EmbeddedResource(
+            type="resource",
+            resource=resource_content,
         )
 
-        return json.dumps(response, indent=2)
+        # Format-specific emoji and label
+        format_info = {
+            ExportFormat.DOCX: ("📄", "DOCX"),
+            ExportFormat.MARKDOWN: ("📝", "Markdown"),
+            ExportFormat.JSON: ("📋", "JSON"),
+        }
+        emoji, label = format_info.get(result.format, ("📁", result.format.value.upper()))
+
+        # Return metadata as TextContent + file as EmbeddedResource
+        # This enables VS Code's native "Save As" functionality for all formats
+        metadata_text = (
+            f"{emoji} **{label} Export Complete**\n\n"
+            f"- **Filename:** {result.filename}\n"
+            f"- **Size:** {result.size_human}\n"
+            f"- **Session:** {session.query[:80]}\n"
+            f"- **Resource URI:** {resource_uri}\n\n"
+            f"The file is attached below. Use 'Save As' to download."
+        )
+        text_content = TextContent(
+            type="text",
+            text=metadata_text,
+        )
+
+        return [text_content, embedded]
 
     except ImportError as e:
         return json.dumps({
