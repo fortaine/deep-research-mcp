@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2025-01-26
+
+**Repository cleanup release** - Clean git history with semantic commits.
+
+### Changed
+
+- **Repository history rewritten**: 65 commits consolidated into 9 logical milestones
+- Commit messages now follow consistent Conventional Commits format
+- No code changes from 0.4.0 - this release focuses on repository hygiene
+
+### Note
+
+Previous versions (0.1.x through 0.4.0) on PyPI remain functional. This version supersedes all prior releases.
+
+## [0.4.0] - 2025-01-26
+
+Resume interrupted research sessions - never lose your work again.
+([#13](https://github.com/MachineMates-AI/gemini-research-mcp/pull/13))
+
+### Added
+
+- **`resume_research` tool**: Recover interrupted deep research sessions that were saved server-side
+- **Startup resume check**: Optionally detect and prompt for resumable sessions when starting new research
+- **`list_research_sessions` improvements**: Now shows session status (completed, in_progress, interrupted) and progress
+- **Workflow diagram**: Visual user journey documentation in Excalidraw format (SVG export included)
+
+### Changed
+
+- Deep research now generates titles at start (before research begins) for better session identification
+- `agent_name` parameter restricted to `DeepResearchAgent` enum for type safety
+- Sessions display enhanced metadata: status, turn counts, timestamps
+
+### Technical
+
+- Session storage extended with `get_resumable_sessions()` and `get_session_for_resume()` methods
+- New `startup_resume_check` config option (default: false)
+- CHANGELOG.md restored for release tracking
+
 ## [0.3.1] - 2026-01-21
 
 Enable VS Code "Save As" button for all export formats.
