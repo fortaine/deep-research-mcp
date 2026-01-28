@@ -67,10 +67,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/fortaine/gemini-research-mcp"
-Documentation = "https://github.com/fortaine/gemini-research-mcp#readme"
-Repository = "https://github.com/fortaine/gemini-research-mcp"
-Issues = "https://github.com/fortaine/gemini-research-mcp/issues"
+Homepage = "https://github.com/machinemates-ai/gemini-research-mcp"
+Documentation = "https://github.com/machinemates-ai/gemini-research-mcp#readme"
+Repository = "https://github.com/machinemates-ai/gemini-research-mcp"
+Issues = "https://github.com/machinemates-ai/gemini-research-mcp/issues"
 
 [project.scripts]
 gemini-research-mcp = "gemini_research_mcp.server:main"
