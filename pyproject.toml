@@ -33,15 +33,15 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "google-genai>=1.59.0",
-    # MCP upgraded from 1.10.0 to 1.25.0; restrict to 1.x to avoid unexpected breaking changes.
-    "mcp>=1.25.0,<2.0.0",
+    "google-genai>=1.60.0",
+    # MCP upgraded from 1.10.0 to 1.26.0; restrict to 1.x to avoid unexpected breaking changes.
+    "mcp>=1.26.0,<2.0.0",
     "httpx>=0.28.1",
-    "python-dotenv>=1.0.0",
+    "python-dotenv>=1.2.1",
     # Persistent storage using industry-standard key-value interface (used by FastMCP, agentpool, etc.)
     "py-key-value-aio[disk]>=0.3.0",
     # XDG-compliant platform-specific directories
-    "platformdirs>=4.0.0",
+    "platformdirs>=4.5.1",
 ]
 
 [project.optional-dependencies]
@@ -49,9 +49,9 @@ dependencies = [
 # Zero external runtime dependencies - pure Python, no Pandoc binary needed
 # Optional: pygments for syntax highlighting in code blocks
 docx = [
-    "marko>=2.0.0",
-    "python-docx>=1.1.0",
-    "pygments>=2.18.0",
+    "marko>=2.2.2",
+    "python-docx>=1.2.0",
+    "pygments>=2.19.2",
 ]
 dev = [
     "pytest>=8.0.0",
@@ -60,10 +60,10 @@ dev = [
     "pytest-timeout>=2.3.0",
     "mypy>=1.10.0",
     "ruff>=0.4.0",
-    "marko>=2.0.0",
-    "python-docx>=1.1.0",
-    "pygments>=2.18.0",
-    "types-Pygments>=2.18.0",
+    "marko>=2.2.2",
+    "python-docx>=1.2.0",
+    "pygments>=2.19.2",
+    "types-Pygments>=2.19.0",
 ]
 
 [project.urls]
